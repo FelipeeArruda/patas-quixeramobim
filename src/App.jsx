@@ -1,45 +1,43 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { 
-  getAuth, 
-  signInWithPopup, 
-  GoogleAuthProvider, 
-  onAuthStateChanged, 
-  signOut,
-  signInWithCustomToken,
-  signInAnonymously
+import {
+  getAuth,
+  signInWithPopup,
+  GoogleAuthProvider,
+  onAuthStateChanged,
+  signOut
 } from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  addDoc, 
-  onSnapshot 
+import {
+  getFirestore,
+  collection,
+  addDoc,
+  onSnapshot,
+  serverTimestamp
 } from 'firebase/firestore';
-import { 
-  Heart, 
-  MapPin, 
-  PlusCircle, 
-  Dog, 
-  Phone, 
-  AlertTriangle, 
-  Search, 
-  Calendar, 
-  Syringe, 
-  LogOut, 
-  Lock, 
+import {
+  Heart,
+  MapPin,
+  PlusCircle,
+  Dog,
+  Phone,
+  AlertTriangle,
+  Search,
+  Calendar,
+  Syringe,
+  LogOut,
+  Lock,
   Sparkles,
   MessageSquare,
   ShieldCheck,
   X,
   Filter,
-  Megaphone,
   Truck,
   CheckCircle2,
   Clock,
   Info
 } from 'lucide-react';
 
-// Configuração do Firebase (Usa variáveis globais do ambiente ou substitua pelas chaves do seu Console Firebase)
+// Configuração oficial do Firebase - Projeto Patas de Quixeramobim
 const firebaseConfig = {
   apiKey: "AIzaSyCNAVow3Pr-82sAhuDmsEJOZzt0Shr55bU",
   authDomain: "patas-quixeramobim.firebaseapp.com",
@@ -54,7 +52,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'patas-quixeramobim-tcc';
-const googleProvider = new GoogleAuthProvider();
 
 // Zonas Georreferenciadas do Mapa Térmico de Quixeramobim
 const INITIAL_HEAT_ZONES = [
@@ -66,7 +63,7 @@ const INITIAL_HEAT_ZONES = [
   { id: 6, bairro: 'Entorno da Barragem', top: '28%', left: '55%', size: '120px', color: 'rgba(239, 68, 68, 0.6)', nivel: 'Crítico (Descarte Recorrente)', ocorrencias: 15 }
 ];
 
-// Dados iniciais caso o banco esteja vazio na primeira execução
+// Dados iniciais de apoio caso o banco esteja vazio
 const DEFAULT_ANIMAIS = [
   {
     id: 'default-1',
@@ -150,9 +147,18 @@ const DEFAULT_MURAL = [
   }
 ];
 
+function mergeUniqueById(firestoreDocs, fallbackDocs) {
+  const map = new Map();
+  firestoreDocs.forEach((item) => map.set(item.id, item));
+  fallbackDocs.forEach((item) => {
+    if (!map.has(item.id)) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
 export default function App() {
-  const [user, setUser] = useState(null); // Usuário real do Google (isAnonymous === false)
-  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('mapa');
 
   // Modais de Cadastro
@@ -165,7 +171,7 @@ export default function App() {
   // Notificação Toast
   const [toastMessage, setToastMessage] = useState(null);
 
-  // Estados de Dados (Sincronizados com Firestore)
+  // Estados de Dados
   const [animaisAdocao, setAnimaisAdocao] = useState(DEFAULT_ANIMAIS);
   const [animaisPerdidos, setAnimaisPerdidos] = useState(DEFAULT_PERDIDOS);
   const [eventosAdocao, setEventosAdocao] = useState(DEFAULT_EVENTOS);
@@ -195,38 +201,23 @@ export default function App() {
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 4500);
+    setTimeout(() => setToastMessage(null), 5000);
   };
 
-  // 1. Inicialização da Autenticação Firebase (Suporta ambiente embutido e login real com Google)
+  // 1. Observador de Estado de Autenticação Real do Google (Firebase Auth)
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
-      } catch (err) {
-        console.warn("Aviso na inicialização de sessão anônima:", err.message);
-      }
-    };
-    initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setAuthReady(true);
-      // Apenas considera logado com permissões se não for anônimo (ou seja, entrou via Google)
       if (currentUser && !currentUser.isAnonymous) {
         setUser({
           uid: currentUser.uid,
-          displayName: currentUser.displayName || 'Protetor Google',
-          email: currentUser.email,
-          photoURL: currentUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150',
-          role: 'Conta Google Verificada'
+          displayName: currentUser.displayName || 'Usuário Google',
+          email: currentUser.email || '',
+          photoURL: currentUser.photoURL || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=150'
         });
       } else {
         setUser(null);
       }
+      setAuthLoading(false);
     });
 
     return () => unsubscribe();
@@ -234,42 +225,40 @@ export default function App() {
 
   // 2. Sincronização em Tempo Real com Cloud Firestore
   useEffect(() => {
-    if (!authReady || !auth.currentUser) return;
-
     const unsubAdocao = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'),
       (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (docs.length > 0) setAnimaisAdocao([...docs, ...DEFAULT_ANIMAIS]);
+        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setAnimaisAdocao(mergeUniqueById(docs, DEFAULT_ANIMAIS));
       },
-      (err) => console.warn("Firestore Adoção (modo local ativo):", err.message)
+      (err) => console.warn('Firestore Adoção:', err.message)
     );
 
     const unsubPerdidos = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'),
       (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (docs.length > 0) setAnimaisPerdidos([...docs, ...DEFAULT_PERDIDOS]);
+        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setAnimaisPerdidos(mergeUniqueById(docs, DEFAULT_PERDIDOS));
       },
-      (err) => console.warn("Firestore Perdidos (modo local ativo):", err.message)
+      (err) => console.warn('Firestore Perdidos:', err.message)
     );
 
     const unsubEventos = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'eventos_adocao'),
       (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (docs.length > 0) setEventosAdocao([...docs, ...DEFAULT_EVENTOS]);
+        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setEventosAdocao(mergeUniqueById(docs, DEFAULT_EVENTOS));
       },
-      (err) => console.warn("Firestore Eventos (modo local ativo):", err.message)
+      (err) => console.warn('Firestore Eventos:', err.message)
     );
 
     const unsubMural = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'),
       (snapshot) => {
-        const docs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        if (docs.length > 0) setPedidosMural([...docs, ...DEFAULT_MURAL]);
+        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        setPedidosMural(mergeUniqueById(docs, DEFAULT_MURAL));
       },
-      (err) => console.warn("Firestore Mural (modo local ativo):", err.message)
+      (err) => console.warn('Firestore Mural:', err.message)
     );
 
     return () => {
@@ -278,139 +267,180 @@ export default function App() {
       unsubEventos();
       unsubMural();
     };
-  }, [authReady]);
+  }, []);
 
-  // Login Real com Conta do Google (OAuth 2.0 Popup)
+  // Login Real com Conta Google via Popup OAuth 2.0
   const handleLoginGoogle = async () => {
     try {
-      googleProvider.setCustomParameters({ prompt: 'select_account' });
-      const result = await signInWithPopup(auth, googleProvider);
-      if (result.user) {
-        showToast(`✅ Bem-vindo(a), ${result.user.displayName}! Conta Google conectada.`);
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      const result = await signInWithPopup(auth, provider);
+      if (result?.user) {
+        showToast(`✅ Autenticado com Google: ${result.user.displayName}`);
       }
     } catch (error) {
-      console.error("Erro na autenticação Google:", error);
-      if (error.code === 'auth/configuration-not-found' || error.code === 'auth/api-key-not-valid.-please-pass-a-valid-api-key.') {
-        showToast('⚠️ Configure sua apiKey do Firebase Console no código para abrir o popup do Google.');
+      console.error('Erro no login Google:', error);
+      if (error.code === 'auth/popup-blocked') {
+        showToast('⚠️ O navegador bloqueou o popup do Google. Permita popups para este site e tente novamente.');
       } else if (error.code === 'auth/popup-closed-by-user') {
-        showToast('Login cancelado: a janela do Google foi fechada.');
+        showToast('Login cancelado: a janela de seleção da conta Google foi fechada.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        showToast('⚠️ Domínio não autorizado no Firebase Console. Adicione este domínio em Authentication > Settings > Authorized domains.');
+      } else if (error.code === 'auth/operation-not-allowed') {
+        showToast('⚠️ Ative o provedor Google em Firebase Console > Authentication > Sign-in method.');
       } else {
-        showToast(`❌ Erro ao autenticar: ${error.message}`);
+        showToast(`❌ Erro na autenticação Google (${error.code || 'desconhecido'}): ${error.message}`);
       }
     }
   };
 
+  // Encerrar Sessão Real do Google
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      await signInAnonymously(auth);
-      showToast('Você saiu da sua conta Google.');
+      setShowModalAdocao(false);
+      setShowModalEvento(false);
+      setShowModalPerdido(false);
+      setShowModalMural(false);
+      showToast('Sessão da conta Google encerrada.');
     } catch (error) {
-      console.error("Erro ao sair:", error);
+      console.error('Erro ao encerrar sessão:', error);
+      showToast('❌ Não foi possível encerrar a sessão no momento.');
     }
   };
 
-  // Submissão de Formulários (Salva no Firestore e atualiza tela)
+  // Submissão de Formulários
   const handleSubmitAdocao = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      showToast('🔒 Faça login com sua conta Google para cadastrar.');
+      return;
+    }
+
     const novo = {
       ...formAdocao,
       tutor: user.displayName,
+      tutorUid: user.uid,
       tutorEmail: user.email,
-      criadoEm: new Date().toISOString(),
+      criadoEm: serverTimestamp(),
       foto: formAdocao.foto || 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500'
     };
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'), novo);
-    } catch {
-      setAnimaisAdocao([{ id: Date.now(), ...novo }, ...animaisAdocao]);
+      showToast('✅ Animal cadastrado e salvo no Cloud Firestore!');
+    } catch (err) {
+      console.warn('Salvamento local de contingência:', err.message);
+      setAnimaisAdocao([{ id: `local-${Date.now()}`, ...novo }, ...animaisAdocao]);
+      showToast('✅ Animal adicionado na visualização atual.');
     }
 
     setShowModalAdocao(false);
     setFormAdocao({ nome: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', idade: '', bairro: 'Centro', saude: '', contato: '', foto: '' });
-    showToast('✅ Animal cadastrado para adoção!');
     setActiveTab('adocao');
   };
 
   const handleSubmitPerdido = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      showToast('🔒 Faça login com sua conta Google para publicar alerta.');
+      return;
+    }
+
     const novo = {
       ...formPerdido,
       dono: user.displayName,
-      criadoEm: new Date().toISOString(),
+      donoUid: user.uid,
+      criadoEm: serverTimestamp(),
       foto: formPerdido.foto || 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=500'
     };
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'), novo);
-    } catch {
-      setAnimaisPerdidos([{ id: Date.now(), ...novo }, ...animaisPerdidos]);
+      showToast('🚨 Alerta de animal perdido salvo no Cloud Firestore!');
+    } catch (err) {
+      console.warn('Salvamento local de contingência:', err.message);
+      setAnimaisPerdidos([{ id: `local-${Date.now()}`, ...novo }, ...animaisPerdidos]);
+      showToast('🚨 Alerta publicado na visualização atual.');
     }
 
     setShowModalPerdido(false);
     setFormPerdido({ nomeAnimal: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', bairroSumico: 'Centro', dataSumico: '', descricao: '', contatoDono: '', foto: '' });
-    showToast('🚨 Alerta de animal perdido publicado!');
     setActiveTab('perdidos');
   };
 
   const handleSubmitEvento = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      showToast('🔒 Faça login com sua conta Google para divulgar eventos.');
+      return;
+    }
+
     const novo = {
       ...formEvento,
       organizador: formEvento.organizador || user.displayName,
-      criadoEm: new Date().toISOString()
+      criadoPorUid: user.uid,
+      criadoEm: serverTimestamp()
     };
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'eventos_adocao'), novo);
-    } catch {
-      setEventosAdocao([{ id: Date.now(), ...novo }, ...eventosAdocao]);
+      showToast('📅 Evento de adoção salvo no Cloud Firestore!');
+    } catch (err) {
+      console.warn('Salvamento local de contingência:', err.message);
+      setEventosAdocao([{ id: `local-${Date.now()}`, ...novo }, ...eventosAdocao]);
+      showToast('📅 Evento adicionado na visualização atual.');
     }
 
     setShowModalEvento(false);
     setFormEvento({ titulo: '', data: '', horario: '', local: '', organizador: '', descricao: '' });
-    showToast('📅 Evento de adoção agendado no mural!');
     setActiveTab('eventos');
   };
 
   const handleSubmitMural = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user) {
+      showToast('🔒 Faça login com sua conta Google para postar no mural.');
+      return;
+    }
+
     const novo = {
       ...formMural,
       usuarioNome: user.displayName,
-      dataPostagem: new Date().toLocaleDateString('pt-BR')
+      usuarioUid: user.uid,
+      dataPostagem: new Date().toLocaleDateString('pt-BR'),
+      criadoEm: serverTimestamp()
     };
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'), novo);
-    } catch {
-      setPedidosMural([{ id: Date.now(), ...novo }, ...pedidosMural]);
+      showToast('📢 Pedido de adoção salvo no Cloud Firestore!');
+    } catch (err) {
+      console.warn('Salvamento local de contingência:', err.message);
+      setPedidosMural([{ id: `local-${Date.now()}`, ...novo }, ...pedidosMural]);
+      showToast('📢 Pedido publicado na visualização atual.');
     }
 
     setShowModalMural(false);
     setFormMural({ especieDesejada: 'Cão', porteDesejado: 'Médio', racaPreferencial: '', bairroMoradia: 'Centro', descricao: '', contato: '' });
-    showToast('📢 Pedido de adoção publicado!');
     setActiveTab('eventos');
   };
 
-  const animaisFiltrados = animaisAdocao.filter(a => {
+  const animaisFiltrados = animaisAdocao.filter((a) => {
     const matchEspecie = filtroEspecie === 'Todos' || a.especie === filtroEspecie;
     const matchPorte = filtroPorte === 'Todos' || a.porte === filtroPorte;
-    const matchSearch = a.nome.toLowerCase().includes(filtroBusca.toLowerCase()) ||
-                        a.raca.toLowerCase().includes(filtroBusca.toLowerCase()) ||
-                        a.cor.toLowerCase().includes(filtroBusca.toLowerCase()) ||
-                        a.bairro.toLowerCase().includes(filtroBusca.toLowerCase());
+    const busca = filtroBusca.toLowerCase();
+    const matchSearch =
+      (a.nome || '').toLowerCase().includes(busca) ||
+      (a.raca || '').toLowerCase().includes(busca) ||
+      (a.cor || '').toLowerCase().includes(busca) ||
+      (a.bairro || '').toLowerCase().includes(busca);
     return matchEspecie && matchPorte && matchSearch;
   });
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans">
-      
+
       {/* Notificação Toast */}
       {toastMessage && (
         <div className="fixed top-4 right-4 z-50 bg-emerald-950 text-emerald-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-emerald-600 max-w-md">
@@ -422,7 +452,7 @@ export default function App() {
       {/* HEADER PRINCIPAL */}
       <header className="bg-emerald-800 text-white shadow-lg sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
-          
+
           <div className="flex items-center gap-3">
             <div className="bg-emerald-700 p-2.5 rounded-2xl border border-emerald-600 shadow-inner">
               <Dog className="w-7 h-7 text-emerald-300" />
@@ -438,7 +468,9 @@ export default function App() {
 
           {/* Botão Oficial de Login com Google */}
           <div>
-            {user ? (
+            {authLoading ? (
+              <span className="text-xs text-emerald-200 px-3 py-2">Verificando sessão...</span>
+            ) : user ? (
               <div className="flex items-center gap-3 bg-emerald-900/90 p-1.5 pr-3 rounded-full border border-emerald-600 shadow-sm">
                 <img src={user.photoURL} alt={user.displayName} className="w-9 h-9 rounded-full border-2 border-emerald-400 object-cover" />
                 <div className="text-left hidden sm:block">
@@ -447,16 +479,16 @@ export default function App() {
                     <ShieldCheck className="w-3 h-3 text-emerald-400" /> {user.email}
                   </span>
                 </div>
-                <button 
+                <button
                   onClick={handleLogout}
                   title="Sair da conta Google"
-                  className="p-1.5 bg-emerald-800 hover:bg-red-600 text-emerald-200 hover:text-white rounded-full transition ml-1"
+                  className="p-1.5 bg-emerald-800 hover:bg-red-600 text-emerald-200 hover:text-white rounded-full transition ml-1 cursor-pointer"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
-              <button 
+              <button
                 onClick={handleLoginGoogle}
                 className="bg-white hover:bg-slate-50 text-slate-800 font-bold py-2 px-4 rounded-xl text-xs sm:text-sm shadow-md transition flex items-center gap-2.5 border border-slate-200 cursor-pointer"
               >
@@ -470,33 +502,33 @@ export default function App() {
         {/* NAVEGAÇÃO POR ABAS */}
         <div className="bg-emerald-900/95 border-t border-emerald-700/60">
           <div className="max-w-7xl mx-auto px-4 flex gap-1.5 overflow-x-auto py-1.5">
-            <button 
+            <button
               onClick={() => setActiveTab('mapa')}
-              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${activeTab === 'mapa' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
+              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${activeTab === 'mapa' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
             >
               <MapPin className="w-4 h-4 text-emerald-300" /> Mapa de Calor
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('adocao')}
-              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${activeTab === 'adocao' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
+              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${activeTab === 'adocao' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
             >
               <Heart className="w-4 h-4 text-pink-300" /> Adoção Responsável
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('castramovel')}
-              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${activeTab === 'castramovel' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
+              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${activeTab === 'castramovel' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
             >
               <Truck className="w-4 h-4 text-amber-300" /> Castramóvel QXB
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('perdidos')}
-              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${activeTab === 'perdidos' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
+              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${activeTab === 'perdidos' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
             >
               <AlertTriangle className="w-4 h-4 text-red-300" /> Achados e Perdidos
             </button>
-            <button 
+            <button
               onClick={() => setActiveTab('eventos')}
-              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition ${activeTab === 'eventos' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
+              className={`px-3.5 py-2 rounded-lg text-xs sm:text-sm font-bold flex items-center gap-2 whitespace-nowrap transition cursor-pointer ${activeTab === 'eventos' ? 'bg-emerald-600 text-white shadow' : 'text-emerald-100 hover:bg-emerald-800'}`}
             >
               <Calendar className="w-4 h-4 text-cyan-300" /> Eventos & Mural
             </button>
@@ -518,8 +550,8 @@ export default function App() {
                 {user ? `Autenticado via Google: ${user.displayName}` : 'Acesso Visitante (Apenas Leitura)'}
               </h3>
               <p className="text-xs text-slate-500">
-                {user 
-                  ? 'Permissões liberadas: Você pode cadastrar animais, divulgar feiras de adoção, reportar sumiços e postar no mural.' 
+                {user
+                  ? 'Permissões liberadas: Você pode cadastrar animais, divulgar feiras de adoção, reportar sumiços e postar no mural.'
                   : 'Conecte sua conta real do Google para cadastrar animais para adoção ou anunciar feiras e alertas.'}
               </p>
             </div>
@@ -527,25 +559,25 @@ export default function App() {
 
           {user ? (
             <div className="flex flex-wrap gap-2">
-              <button 
+              <button
                 onClick={() => setShowModalAdocao(true)}
                 className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
                 <PlusCircle className="w-4 h-4" /> Cadastrar Animal
               </button>
-              <button 
+              <button
                 onClick={() => setShowModalEvento(true)}
                 className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
                 <Calendar className="w-4 h-4" /> Divulgar Feira
               </button>
-              <button 
+              <button
                 onClick={() => setShowModalMural(true)}
                 className="bg-cyan-700 hover:bg-cyan-800 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4" /> Quero Adotar
               </button>
-              <button 
+              <button
                 onClick={() => setShowModalPerdido(true)}
                 className="bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
@@ -553,7 +585,7 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button 
+            <button
               onClick={handleLoginGoogle}
               className="bg-emerald-800 hover:bg-emerald-900 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
             >
@@ -600,8 +632,8 @@ export default function App() {
                 <p className="text-[11px] text-slate-300">Clique em uma mancha térmica para ver detalhes do bairro</p>
               </div>
 
-              {INITIAL_HEAT_ZONES.map(z => (
-                <div 
+              {INITIAL_HEAT_ZONES.map((z) => (
+                <div
                   key={z.id}
                   onClick={() => setSelectedZone(z)}
                   style={{
@@ -617,8 +649,8 @@ export default function App() {
                 />
               ))}
 
-              {INITIAL_HEAT_ZONES.map(z => (
-                <div 
+              {INITIAL_HEAT_ZONES.map((z) => (
+                <div
                   key={'pin-' + z.id}
                   onClick={() => setSelectedZone(z)}
                   style={{ top: z.top, left: z.left, transform: 'translate(-50%, -50%)' }}
@@ -665,18 +697,18 @@ export default function App() {
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
                     placeholder="Buscar por raça, cor, nome ou bairro..."
                     value={filtroBusca}
-                    onChange={e => setFiltroBusca(e.target.value)}
+                    onChange={(e) => setFiltroBusca(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                 </div>
 
-                <select 
-                  value={filtroEspecie} 
-                  onChange={e => setFiltroEspecie(e.target.value)}
+                <select
+                  value={filtroEspecie}
+                  onChange={(e) => setFiltroEspecie(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
                   <option value="Todos">Todas as Espécies</option>
@@ -684,9 +716,9 @@ export default function App() {
                   <option value="Gato">Gatos</option>
                 </select>
 
-                <select 
-                  value={filtroPorte} 
-                  onChange={e => setFiltroPorte(e.target.value)}
+                <select
+                  value={filtroPorte}
+                  onChange={(e) => setFiltroPorte(e.target.value)}
                   className="w-full p-2 border border-slate-300 rounded-xl text-xs sm:text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                 >
                   <option value="Todos">Todos os Portes</option>
@@ -698,7 +730,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {animaisFiltrados.map(a => (
+              {animaisFiltrados.map((a) => (
                 <div key={a.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between">
                   <div>
                     <div className="relative">
@@ -720,7 +752,7 @@ export default function App() {
                       <p className="text-xs text-slate-600"><strong>Cor:</strong> {a.cor} | <strong>Idade:</strong> {a.idade}</p>
                       <p className="text-xs text-slate-600"><strong>Bairro:</strong> {a.bairro}</p>
                       <p className="text-xs text-slate-600"><strong>Responsável:</strong> {a.tutor}</p>
-                      
+
                       <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-xs text-emerald-900 mt-2">
                         <strong>Saúde / Vacinação:</strong> {a.saude}
                       </div>
@@ -728,9 +760,9 @@ export default function App() {
                   </div>
 
                   <div className="p-5 pt-0">
-                    <a 
+                    <a
                       href={`https://wa.me/${a.contato}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
                     >
@@ -761,7 +793,6 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Cronograma e Locais */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b pb-3">
                   <Clock className="w-5 h-5 text-emerald-700" />
@@ -788,7 +819,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Requisitos e Pré-Operatório */}
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
                 <h3 className="text-base font-bold text-slate-900 flex items-center gap-2 border-b pb-3">
                   <CheckCircle2 className="w-5 h-5 text-emerald-700" />
@@ -838,7 +868,7 @@ export default function App() {
               </div>
 
               {user ? (
-                <button 
+                <button
                   onClick={() => setShowModalPerdido(true)}
                   className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow cursor-pointer"
                 >
@@ -852,7 +882,7 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {animaisPerdidos.map(p => (
+              {animaisPerdidos.map((p) => (
                 <div key={p.id} className="bg-white rounded-2xl overflow-hidden border border-red-200 shadow-sm flex flex-col justify-between">
                   <div>
                     <div className="relative">
@@ -876,9 +906,9 @@ export default function App() {
                   </div>
 
                   <div className="p-5 pt-0">
-                    <a 
+                    <a
                       href={`https://wa.me/${p.contatoDono}?text=Olá!%20Tenho%20informações%20sobre%20o%20animal%20perdido%20${p.nomeAnimal}.`}
-                      target="_blank" 
+                      target="_blank"
                       rel="noopener noreferrer"
                       className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
                     >
@@ -894,7 +924,6 @@ export default function App() {
         {/* ABA 5: EVENTOS DE ADOÇÃO, VACINAÇÃO E MURAL */}
         {activeTab === 'eventos' && (
           <div className="space-y-6">
-            {/* Eventos de Adoção (Dinâmico) */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
               <div className="flex flex-wrap justify-between items-center gap-4 border-b pb-3">
                 <div className="flex items-center gap-2 text-emerald-800">
@@ -906,7 +935,7 @@ export default function App() {
                 </div>
 
                 {user && (
-                  <button 
+                  <button
                     onClick={() => setShowModalEvento(true)}
                     className="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
                   >
@@ -916,7 +945,7 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {eventosAdocao.map(ev => (
+                {eventosAdocao.map((ev) => (
                   <div key={ev.id} className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-1.5 flex flex-col justify-between">
                     <div>
                       <div className="flex justify-between items-start gap-2">
@@ -936,7 +965,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Aviso de Vacinação */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3">
               <div className="flex items-center gap-2 text-blue-800 border-b pb-2">
                 <Syringe className="w-5 h-5 text-blue-600" />
@@ -950,7 +978,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Mural Quero Adotar */}
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
               <div className="flex flex-wrap justify-between items-center gap-4 border-b pb-3">
                 <div>
@@ -962,7 +989,7 @@ export default function App() {
                 </div>
 
                 {user ? (
-                  <button 
+                  <button
                     onClick={() => setShowModalMural(true)}
                     className="bg-cyan-700 hover:bg-cyan-800 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
                   >
@@ -974,7 +1001,7 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {pedidosMural.map(m => (
+                {pedidosMural.map((m) => (
                   <div key={m.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
                     <div className="flex justify-between items-start">
                       <div className="flex items-center gap-2">
@@ -997,7 +1024,7 @@ export default function App() {
 
                     <div className="flex justify-between items-center text-xs pt-1">
                       <span className="text-slate-500"><strong>Porte:</strong> {m.porteDesejado} | {m.racaPreferencial}</span>
-                      <a 
+                      <a
                         href={`https://wa.me/${m.contato}?text=Olá%20${m.usuarioNome}!%20Vi%20seu%20pedido%20no%20mural%20Patas%20de%20Quixeramobim.`}
                         target="_blank"
                         rel="noreferrer"
@@ -1026,7 +1053,7 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Cadastrar Animal para Adoção</h3>
-              <button onClick={() => setShowModalAdocao(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setShowModalAdocao(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1035,11 +1062,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Nome do Animal</label>
-                  <input type="text" required value={formAdocao.nome} onChange={e => setFormAdocao({...formAdocao, nome: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formAdocao.nome} onChange={(e) => setFormAdocao({ ...formAdocao, nome: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Espécie</label>
-                  <select value={formAdocao.especie} onChange={e => setFormAdocao({...formAdocao, especie: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formAdocao.especie} onChange={(e) => setFormAdocao({ ...formAdocao, especie: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Cão">Cão</option>
                     <option value="Gato">Gato</option>
                   </select>
@@ -1049,15 +1076,15 @@ export default function App() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Raça</label>
-                  <input type="text" required value={formAdocao.raca} onChange={e => setFormAdocao({...formAdocao, raca: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formAdocao.raca} onChange={(e) => setFormAdocao({ ...formAdocao, raca: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Cor</label>
-                  <input type="text" required value={formAdocao.cor} onChange={e => setFormAdocao({...formAdocao, cor: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formAdocao.cor} onChange={(e) => setFormAdocao({ ...formAdocao, cor: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Porte</label>
-                  <select value={formAdocao.porte} onChange={e => setFormAdocao({...formAdocao, porte: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formAdocao.porte} onChange={(e) => setFormAdocao({ ...formAdocao, porte: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Pequeno">Pequeno</option>
                     <option value="Médio">Médio</option>
                     <option value="Grande">Grande</option>
@@ -1068,22 +1095,22 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Idade Aprox.</label>
-                  <input type="text" required value={formAdocao.idade} onChange={e => setFormAdocao({...formAdocao, idade: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formAdocao.idade} onChange={(e) => setFormAdocao({ ...formAdocao, idade: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Bairro em Quixeramobim</label>
-                  <input type="text" required value={formAdocao.bairro} onChange={e => setFormAdocao({...formAdocao, bairro: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formAdocao.bairro} onChange={(e) => setFormAdocao({ ...formAdocao, bairro: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Estado de Saúde / Vacinação</label>
-                <input type="text" required value={formAdocao.saude} onChange={e => setFormAdocao({...formAdocao, saude: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" required value={formAdocao.saude} onChange={(e) => setFormAdocao({ ...formAdocao, saude: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">WhatsApp para Contato (com DDD)</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formAdocao.contato} onChange={e => setFormAdocao({...formAdocao, contato: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: 5588999999999" required value={formAdocao.contato} onChange={(e) => setFormAdocao({ ...formAdocao, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
@@ -1100,7 +1127,7 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Divulgar Evento de Adoção</h3>
-              <button onClick={() => setShowModalEvento(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setShowModalEvento(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1108,33 +1135,33 @@ export default function App() {
             <form onSubmit={handleSubmitEvento} className="space-y-3">
               <div>
                 <label className="block text-xs font-bold text-slate-700">Título do Evento / Feira</label>
-                <input type="text" placeholder="Ex: Feira de Adoção na Praça da Matriz" required value={formEvento.titulo} onChange={e => setFormEvento({...formEvento, titulo: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: Feira de Adoção na Praça da Matriz" required value={formEvento.titulo} onChange={(e) => setFormEvento({ ...formEvento, titulo: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Data</label>
-                  <input type="text" placeholder="DD/MM/AAAA" required value={formEvento.data} onChange={e => setFormEvento({...formEvento, data: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" placeholder="DD/MM/AAAA" required value={formEvento.data} onChange={(e) => setFormEvento({ ...formEvento, data: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Horário</label>
-                  <input type="text" placeholder="Ex: 08:00 às 12:00" required value={formEvento.horario} onChange={e => setFormEvento({...formEvento, horario: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" placeholder="Ex: 08:00 às 12:00" required value={formEvento.horario} onChange={(e) => setFormEvento({ ...formEvento, horario: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Local em Quixeramobim</label>
-                <input type="text" placeholder="Ex: Praça da Prefeitura" required value={formEvento.local} onChange={e => setFormEvento({...formEvento, local: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: Praça da Prefeitura" required value={formEvento.local} onChange={(e) => setFormEvento({ ...formEvento, local: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Organizador / ONG</label>
-                <input type="text" placeholder="Nome do grupo ou protetor" value={formEvento.organizador} onChange={e => setFormEvento({...formEvento, organizador: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Nome do grupo ou protetor" value={formEvento.organizador} onChange={(e) => setFormEvento({ ...formEvento, organizador: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Detalhes e Documentos Exigidos</label>
-                <textarea required placeholder="Ex: Levar RG e comprovante de residência..." value={formEvento.descricao} onChange={e => setFormEvento({...formEvento, descricao: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={3}></textarea>
+                <textarea required placeholder="Ex: Levar RG e comprovante de residência..." value={formEvento.descricao} onChange={(e) => setFormEvento({ ...formEvento, descricao: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={3}></textarea>
               </div>
 
               <button type="submit" className="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
@@ -1151,7 +1178,7 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Publicar Alerta de Animal Perdido</h3>
-              <button onClick={() => setShowModalPerdido(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setShowModalPerdido(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1160,11 +1187,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Nome do Animal</label>
-                  <input type="text" required value={formPerdido.nomeAnimal} onChange={e => setFormPerdido({...formPerdido, nomeAnimal: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formPerdido.nomeAnimal} onChange={(e) => setFormPerdido({ ...formPerdido, nomeAnimal: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Espécie</label>
-                  <select value={formPerdido.especie} onChange={e => setFormPerdido({...formPerdido, especie: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formPerdido.especie} onChange={(e) => setFormPerdido({ ...formPerdido, especie: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Cão">Cão</option>
                     <option value="Gato">Gato</option>
                   </select>
@@ -1174,15 +1201,15 @@ export default function App() {
               <div className="grid grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Raça</label>
-                  <input type="text" required value={formPerdido.raca} onChange={e => setFormPerdido({...formPerdido, raca: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formPerdido.raca} onChange={(e) => setFormPerdido({ ...formPerdido, raca: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Cor</label>
-                  <input type="text" required value={formPerdido.cor} onChange={e => setFormPerdido({...formPerdido, cor: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formPerdido.cor} onChange={(e) => setFormPerdido({ ...formPerdido, cor: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Porte</label>
-                  <select value={formPerdido.porte} onChange={e => setFormPerdido({...formPerdido, porte: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formPerdido.porte} onChange={(e) => setFormPerdido({ ...formPerdido, porte: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Pequeno">Pequeno</option>
                     <option value="Médio">Médio</option>
                     <option value="Grande">Grande</option>
@@ -1193,22 +1220,22 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Bairro do Desaparecimento</label>
-                  <input type="text" required value={formPerdido.bairroSumico} onChange={e => setFormPerdido({...formPerdido, bairroSumico: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" required value={formPerdido.bairroSumico} onChange={(e) => setFormPerdido({ ...formPerdido, bairroSumico: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Data do Sumiço</label>
-                  <input type="text" placeholder="DD/MM/AAAA" required value={formPerdido.dataSumico} onChange={e => setFormPerdido({...formPerdido, dataSumico: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <input type="text" placeholder="DD/MM/AAAA" required value={formPerdido.dataSumico} onChange={(e) => setFormPerdido({ ...formPerdido, dataSumico: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Descrição / Características</label>
-                <textarea required value={formPerdido.descricao} onChange={e => setFormPerdido({...formPerdido, descricao: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={2}></textarea>
+                <textarea required value={formPerdido.descricao} onChange={(e) => setFormPerdido({ ...formPerdido, descricao: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={2}></textarea>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">WhatsApp do Tutor</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formPerdido.contatoDono} onChange={e => setFormPerdido({...formPerdido, contatoDono: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: 5588999999999" required value={formPerdido.contatoDono} onChange={(e) => setFormPerdido({ ...formPerdido, contatoDono: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
@@ -1225,7 +1252,7 @@ export default function App() {
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Postar Pedido: "Quero Adotar"</h3>
-              <button onClick={() => setShowModalMural(false)} className="text-slate-400 hover:text-slate-700">
+              <button onClick={() => setShowModalMural(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1234,14 +1261,14 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Espécie Desejada</label>
-                  <select value={formMural.especieDesejada} onChange={e => setFormMural({...formMural, especieDesejada: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formMural.especieDesejada} onChange={(e) => setFormMural({ ...formMural, especieDesejada: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Cão">Cão</option>
                     <option value="Gato">Gato</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Porte Preferencial</label>
-                  <select value={formMural.porteDesejado} onChange={e => setFormMural({...formMural, porteDesejado: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs">
+                  <select value={formMural.porteDesejado} onChange={(e) => setFormMural({ ...formMural, porteDesejado: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs">
                     <option value="Pequeno">Pequeno</option>
                     <option value="Médio">Médio</option>
                     <option value="Grande">Grande</option>
@@ -1251,22 +1278,22 @@ export default function App() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Preferência de Raça / Perfil</label>
-                <input type="text" placeholder="Ex: Filhote, dócil..." value={formMural.racaPreferencial} onChange={e => setFormMural({...formMural, racaPreferencial: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: Filhote, dócil..." value={formMural.racaPreferencial} onChange={(e) => setFormMural({ ...formMural, racaPreferencial: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Seu Bairro em Quixeramobim</label>
-                <input type="text" required value={formMural.bairroMoradia} onChange={e => setFormMural({...formMural, bairroMoradia: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" required value={formMural.bairroMoradia} onChange={(e) => setFormMural({ ...formMural, bairroMoradia: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Conte sobre sua casa para os protetores</label>
-                <textarea required placeholder="Ex: Tenho quintal murado..." value={formMural.descricao} onChange={e => setFormMural({...formMural, descricao: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={3}></textarea>
+                <textarea required placeholder="Ex: Tenho quintal murado..." value={formMural.descricao} onChange={(e) => setFormMural({ ...formMural, descricao: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" rows={3}></textarea>
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Seu WhatsApp</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formMural.contato} onChange={e => setFormMural({...formMural, contato: e.target.value})} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <input type="text" placeholder="Ex: 5588999999999" required value={formMural.contato} onChange={(e) => setFormMural({ ...formMural, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" className="w-full bg-cyan-700 hover:bg-cyan-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
