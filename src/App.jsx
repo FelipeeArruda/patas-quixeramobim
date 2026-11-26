@@ -11,6 +11,9 @@ import {
   getFirestore,
   collection,
   addDoc,
+  doc,
+  updateDoc,
+  deleteDoc,
   onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
@@ -34,12 +37,13 @@ import {
   Truck,
   CheckCircle2,
   Clock,
-  Info
+  Info,
+  Pencil,
+  Trash2
 } from 'lucide-react';
 
-// Configuração oficial do Firebase - Projeto Patas de Quixeramobim
 const firebaseConfig = {
-  apiKey: "AIzaSyCNAVow3Pr-82sAhuDmsEJOZzt0Shr55bU",
+  apiKey: "AIzaSyCNAvOw3Pr-82sAhuDmsEJOZzt0Shr55bU",
   authDomain: "patas-quixeramobim.firebaseapp.com",
   projectId: "patas-quixeramobim",
   storageBucket: "patas-quixeramobim.firebasestorage.app",
@@ -53,7 +57,6 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'patas-quixeramobim-tcc';
 
-// Zonas Georreferenciadas do Mapa Térmico de Quixeramobim
 const INITIAL_HEAT_ZONES = [
   { id: 1, bairro: 'Centro', top: '48%', left: '46%', size: '130px', color: 'rgba(239, 68, 68, 0.65)', nivel: 'Crítico (Alta Concentração)', ocorrencias: 18 },
   { id: 2, bairro: 'Edmilson Correia de Vasconcelos', top: '58%', left: '56%', size: '150px', color: 'rgba(239, 68, 68, 0.65)', nivel: 'Crítico (Alta Concentração)', ocorrencias: 22 },
@@ -63,7 +66,6 @@ const INITIAL_HEAT_ZONES = [
   { id: 6, bairro: 'Entorno da Barragem', top: '28%', left: '55%', size: '120px', color: 'rgba(239, 68, 68, 0.6)', nivel: 'Crítico (Descarte Recorrente)', ocorrencias: 15 }
 ];
 
-// Dados iniciais de apoio caso o banco esteja vazio
 const DEFAULT_ANIMAIS = [
   {
     id: 'default-1',
@@ -147,6 +149,19 @@ const DEFAULT_MURAL = [
   }
 ];
 
+const EMPTY_ANIMAL_FORM = {
+  nome: '',
+  especie: 'Cão',
+  raca: '',
+  cor: '',
+  porte: 'Médio',
+  idade: '',
+  bairro: 'Centro',
+  saude: '',
+  contato: '',
+  foto: ''
+};
+
 function mergeUniqueById(firestoreDocs, fallbackDocs) {
   const map = new Map();
   firestoreDocs.forEach((item) => map.set(item.id, item));
@@ -159,33 +174,28 @@ function mergeUniqueById(firestoreDocs, fallbackDocs) {
 export default function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [loginBusy, setLoginBusy] = useState(false);
   const [activeTab, setActiveTab] = useState('mapa');
 
-  // Modais de Cadastro
   const [showModalAdocao, setShowModalAdocao] = useState(false);
+  const [editingAnimalId, setEditingAnimalId] = useState(null);
   const [showModalPerdido, setShowModalPerdido] = useState(false);
   const [showModalMural, setShowModalMural] = useState(false);
   const [showModalEvento, setShowModalEvento] = useState(false);
   const [selectedZone, setSelectedZone] = useState(null);
 
-  // Notificação Toast
   const [toastMessage, setToastMessage] = useState(null);
 
-  // Estados de Dados
   const [animaisAdocao, setAnimaisAdocao] = useState(DEFAULT_ANIMAIS);
   const [animaisPerdidos, setAnimaisPerdidos] = useState(DEFAULT_PERDIDOS);
   const [eventosAdocao, setEventosAdocao] = useState(DEFAULT_EVENTOS);
   const [pedidosMural, setPedidosMural] = useState(DEFAULT_MURAL);
 
-  // Filtros
   const [filtroEspecie, setFiltroEspecie] = useState('Todos');
   const [filtroPorte, setFiltroPorte] = useState('Todos');
   const [filtroBusca, setFiltroBusca] = useState('');
 
-  // Form States
-  const [formAdocao, setFormAdocao] = useState({
-    nome: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', idade: '', bairro: 'Centro', saude: '', contato: '', foto: ''
-  });
+  const [formAdocao, setFormAdocao] = useState(EMPTY_ANIMAL_FORM);
 
   const [formPerdido, setFormPerdido] = useState({
     nomeAnimal: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', bairroSumico: 'Centro', dataSumico: '', descricao: '', contatoDono: '', foto: ''
@@ -201,10 +211,9 @@ export default function App() {
 
   const showToast = (msg) => {
     setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 5000);
+    setTimeout(() => setToastMessage(null), 5500);
   };
 
-  // 1. Observador de Estado de Autenticação Real do Google (Firebase Auth)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser && !currentUser.isAnonymous) {
@@ -223,12 +232,11 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 2. Sincronização em Tempo Real com Cloud Firestore
   useEffect(() => {
     const unsubAdocao = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'),
       (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setAnimaisAdocao(mergeUniqueById(docs, DEFAULT_ANIMAIS));
       },
       (err) => console.warn('Firestore Adoção:', err.message)
@@ -237,7 +245,7 @@ export default function App() {
     const unsubPerdidos = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'),
       (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setAnimaisPerdidos(mergeUniqueById(docs, DEFAULT_PERDIDOS));
       },
       (err) => console.warn('Firestore Perdidos:', err.message)
@@ -246,7 +254,7 @@ export default function App() {
     const unsubEventos = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'eventos_adocao'),
       (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setEventosAdocao(mergeUniqueById(docs, DEFAULT_EVENTOS));
       },
       (err) => console.warn('Firestore Eventos:', err.message)
@@ -255,7 +263,7 @@ export default function App() {
     const unsubMural = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'),
       (snapshot) => {
-        const docs = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         setPedidosMural(mergeUniqueById(docs, DEFAULT_MURAL));
       },
       (err) => console.warn('Firestore Mural:', err.message)
@@ -269,81 +277,172 @@ export default function App() {
     };
   }, []);
 
-  // Login Real com Conta Google via Popup OAuth 2.0
   const handleLoginGoogle = async () => {
+    if (loginBusy) return;
+    setLoginBusy(true);
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       if (result?.user) {
-        showToast(`✅ Autenticado com Google: ${result.user.displayName}`);
+        showToast(`✅ Conectado com Google: ${result.user.displayName}`);
       }
     } catch (error) {
-      console.error('Erro no login Google:', error);
-      if (error.code === 'auth/popup-blocked') {
-        showToast('⚠️ O navegador bloqueou o popup do Google. Permita popups para este site e tente novamente.');
-      } else if (error.code === 'auth/popup-closed-by-user') {
-        showToast('Login cancelado: a janela de seleção da conta Google foi fechada.');
-      } else if (error.code === 'auth/unauthorized-domain') {
-        showToast('⚠️ Domínio não autorizado no Firebase Console. Adicione este domínio em Authentication > Settings > Authorized domains.');
-      } else if (error.code === 'auth/operation-not-allowed') {
+      console.error('Erro detalhado Google Auth:', error);
+      const code = error?.code || '';
+      if (code.includes('api-key-not-valid')) {
+        showToast('⚠️ Chave de API rejeitada pelo Google (auth/api-key-not-valid). Confira em Credenciais do Google Cloud / Configurações do projeto no Firebase.');
+      } else if (code === 'auth/unauthorized-domain') {
+        showToast(`⚠️ Domínio "${window.location.hostname}" não autorizado no Firebase (Authentication > Settings > Authorized domains).`);
+      } else if (code === 'auth/popup-blocked') {
+        showToast('⚠️ Popup bloqueado pelo navegador. Permita popups para este site e tente de novo.');
+      } else if (code === 'auth/popup-closed-by-user') {
+        showToast('Janela de login fechada antes da conclusão.');
+      } else if (code === 'auth/operation-not-allowed') {
         showToast('⚠️ Ative o provedor Google em Firebase Console > Authentication > Sign-in method.');
       } else {
-        showToast(`❌ Erro na autenticação Google (${error.code || 'desconhecido'}): ${error.message}`);
+        showToast(`❌ Falha no login Google (${code || 'erro'}): ${error.message}`);
       }
+    } finally {
+      setLoginBusy(false);
     }
   };
 
-  // Encerrar Sessão Real do Google
   const handleLogout = async () => {
     try {
       await signOut(auth);
       setShowModalAdocao(false);
+      setEditingAnimalId(null);
       setShowModalEvento(false);
       setShowModalPerdido(false);
       setShowModalMural(false);
-      showToast('Sessão da conta Google encerrada.');
+      showToast('Sessão encerrada.');
     } catch (error) {
-      console.error('Erro ao encerrar sessão:', error);
-      showToast('❌ Não foi possível encerrar a sessão no momento.');
+      console.error('Erro ao sair:', error);
+      showToast('❌ Erro ao encerrar sessão.');
     }
   };
 
-  // Submissão de Formulários
+  const openNewAnimalModal = () => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para cadastrar animais.');
+      return;
+    }
+    setEditingAnimalId(null);
+    setFormAdocao(EMPTY_ANIMAL_FORM);
+    setShowModalAdocao(true);
+  };
+
+  const openEditAnimalModal = (animal) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para editar animais.');
+      return;
+    }
+    setEditingAnimalId(animal.id);
+    setFormAdocao({
+      nome: animal.nome || '',
+      especie: animal.especie || 'Cão',
+      raca: animal.raca || '',
+      cor: animal.cor || '',
+      porte: animal.porte || 'Médio',
+      idade: animal.idade || '',
+      bairro: animal.bairro || 'Centro',
+      saude: animal.saude || '',
+      contato: animal.contato || '',
+      foto: animal.foto || ''
+    });
+    setShowModalAdocao(true);
+  };
+
+  const handleDeleteAnimal = async (animal) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para excluir animais.');
+      return;
+    }
+    const confirmar = window.confirm(`Deseja realmente excluir "${animal.nome}" do catálogo de adoção?`);
+    if (!confirmar) return;
+
+    const isFirestoreDoc = !String(animal.id).startsWith('default-') && !String(animal.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_adocao', animal.id));
+        showToast(`🗑️ "${animal.nome}" removido do Cloud Firestore.`);
+        return;
+      } catch (err) {
+        console.warn('Erro ao excluir no Firestore:', err.message);
+      }
+    }
+
+    setAnimaisAdocao((prev) => prev.filter((item) => item.id !== animal.id));
+    showToast(`🗑️ "${animal.nome}" removido da lista.`);
+  };
+
   const handleSubmitAdocao = async (e) => {
     e.preventDefault();
     if (!user) {
-      showToast('🔒 Faça login com sua conta Google para cadastrar.');
+      showToast('🔒 Entre com sua conta Google para salvar.');
+      return;
+    }
+
+    const fotoFinal = formAdocao.foto.trim() || 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500';
+
+    if (editingAnimalId) {
+      const dadosAtualizados = {
+        ...formAdocao,
+        foto: fotoFinal,
+        atualizadoEm: serverTimestamp(),
+        atualizadoPorEmail: user.email
+      };
+
+      const isFirestoreDoc = !String(editingAnimalId).startsWith('default-') && !String(editingAnimalId).startsWith('local-');
+      if (isFirestoreDoc) {
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_adocao', editingAnimalId), dadosAtualizados);
+          showToast(`✏️ Dados de "${formAdocao.nome}" atualizados no Cloud Firestore!`);
+        } catch (err) {
+          console.warn('Atualização local:', err.message);
+          setAnimaisAdocao((prev) => prev.map((item) => (item.id === editingAnimalId ? { ...item, ...dadosAtualizados } : item)));
+          showToast(`✏️ Dados de "${formAdocao.nome}" atualizados.`);
+        }
+      } else {
+        setAnimaisAdocao((prev) => prev.map((item) => (item.id === editingAnimalId ? { ...item, ...dadosAtualizados } : item)));
+        showToast(`✏️ Dados de "${formAdocao.nome}" atualizados.`);
+      }
+
+      setShowModalAdocao(false);
+      setEditingAnimalId(null);
+      setFormAdocao(EMPTY_ANIMAL_FORM);
+      setActiveTab('adocao');
       return;
     }
 
     const novo = {
       ...formAdocao,
+      foto: fotoFinal,
       tutor: user.displayName,
       tutorUid: user.uid,
       tutorEmail: user.email,
-      criadoEm: serverTimestamp(),
-      foto: formAdocao.foto || 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500'
+      criadoEm: serverTimestamp()
     };
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'), novo);
-      showToast('✅ Animal cadastrado e salvo no Cloud Firestore!');
+      showToast('✅ Animal cadastrado no Cloud Firestore!');
     } catch (err) {
-      console.warn('Salvamento local de contingência:', err.message);
-      setAnimaisAdocao([{ id: `local-${Date.now()}`, ...novo }, ...animaisAdocao]);
-      showToast('✅ Animal adicionado na visualização atual.');
+      console.warn('Salvamento local:', err.message);
+      setAnimaisAdocao((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
+      showToast('✅ Animal adicionado no catálogo.');
     }
 
     setShowModalAdocao(false);
-    setFormAdocao({ nome: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', idade: '', bairro: 'Centro', saude: '', contato: '', foto: '' });
+    setFormAdocao(EMPTY_ANIMAL_FORM);
     setActiveTab('adocao');
   };
 
   const handleSubmitPerdido = async (e) => {
     e.preventDefault();
     if (!user) {
-      showToast('🔒 Faça login com sua conta Google para publicar alerta.');
+      showToast('🔒 Entre com sua conta Google para publicar alerta.');
       return;
     }
 
@@ -359,9 +458,9 @@ export default function App() {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'), novo);
       showToast('🚨 Alerta de animal perdido salvo no Cloud Firestore!');
     } catch (err) {
-      console.warn('Salvamento local de contingência:', err.message);
-      setAnimaisPerdidos([{ id: `local-${Date.now()}`, ...novo }, ...animaisPerdidos]);
-      showToast('🚨 Alerta publicado na visualização atual.');
+      console.warn('Salvamento local:', err.message);
+      setAnimaisPerdidos((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
+      showToast('🚨 Alerta publicado.');
     }
 
     setShowModalPerdido(false);
@@ -372,7 +471,7 @@ export default function App() {
   const handleSubmitEvento = async (e) => {
     e.preventDefault();
     if (!user) {
-      showToast('🔒 Faça login com sua conta Google para divulgar eventos.');
+      showToast('🔒 Entre com sua conta Google para divulgar eventos.');
       return;
     }
 
@@ -387,9 +486,9 @@ export default function App() {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'eventos_adocao'), novo);
       showToast('📅 Evento de adoção salvo no Cloud Firestore!');
     } catch (err) {
-      console.warn('Salvamento local de contingência:', err.message);
-      setEventosAdocao([{ id: `local-${Date.now()}`, ...novo }, ...eventosAdocao]);
-      showToast('📅 Evento adicionado na visualização atual.');
+      console.warn('Salvamento local:', err.message);
+      setEventosAdocao((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
+      showToast('📅 Evento adicionado.');
     }
 
     setShowModalEvento(false);
@@ -400,7 +499,7 @@ export default function App() {
   const handleSubmitMural = async (e) => {
     e.preventDefault();
     if (!user) {
-      showToast('🔒 Faça login com sua conta Google para postar no mural.');
+      showToast('🔒 Entre com sua conta Google para postar no mural.');
       return;
     }
 
@@ -414,11 +513,11 @@ export default function App() {
 
     try {
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'), novo);
-      showToast('📢 Pedido de adoção salvo no Cloud Firestore!');
+      showToast('📢 Pedido salvo no Cloud Firestore!');
     } catch (err) {
-      console.warn('Salvamento local de contingência:', err.message);
-      setPedidosMural([{ id: `local-${Date.now()}`, ...novo }, ...pedidosMural]);
-      showToast('📢 Pedido publicado na visualização atual.');
+      console.warn('Salvamento local:', err.message);
+      setPedidosMural((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
+      showToast('📢 Pedido publicado.');
     }
 
     setShowModalMural(false);
@@ -441,7 +540,6 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans">
 
-      {/* Notificação Toast */}
       {toastMessage && (
         <div className="fixed top-4 right-4 z-50 bg-emerald-950 text-emerald-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-emerald-600 max-w-md">
           <Sparkles className="w-5 h-5 text-emerald-400 shrink-0" />
@@ -449,7 +547,6 @@ export default function App() {
         </div>
       )}
 
-      {/* HEADER PRINCIPAL */}
       <header className="bg-emerald-800 text-white shadow-lg sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
 
@@ -466,7 +563,6 @@ export default function App() {
             </div>
           </div>
 
-          {/* Botão Oficial de Login com Google */}
           <div>
             {authLoading ? (
               <span className="text-xs text-emerald-200 px-3 py-2">Verificando sessão...</span>
@@ -490,16 +586,16 @@ export default function App() {
             ) : (
               <button
                 onClick={handleLoginGoogle}
-                className="bg-white hover:bg-slate-50 text-slate-800 font-bold py-2 px-4 rounded-xl text-xs sm:text-sm shadow-md transition flex items-center gap-2.5 border border-slate-200 cursor-pointer"
+                disabled={loginBusy}
+                className="bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-800 font-bold py-2 px-4 rounded-xl text-xs sm:text-sm shadow-md transition flex items-center gap-2.5 border border-slate-200 cursor-pointer"
               >
                 <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-4 h-4" />
-                Entrar com Google
+                {loginBusy ? 'Abrindo Google...' : 'Entrar com Google'}
               </button>
             )}
           </div>
         </div>
 
-        {/* NAVEGAÇÃO POR ABAS */}
         <div className="bg-emerald-900/95 border-t border-emerald-700/60">
           <div className="max-w-7xl mx-auto px-4 flex gap-1.5 overflow-x-auto py-1.5">
             <button
@@ -536,10 +632,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
 
-        {/* BARRA DE PERMISSÕES DO USUÁRIO */}
         <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className={`p-2.5 rounded-xl ${user ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
@@ -551,8 +645,8 @@ export default function App() {
               </h3>
               <p className="text-xs text-slate-500">
                 {user
-                  ? 'Permissões liberadas: Você pode cadastrar animais, divulgar feiras de adoção, reportar sumiços e postar no mural.'
-                  : 'Conecte sua conta real do Google para cadastrar animais para adoção ou anunciar feiras e alertas.'}
+                  ? 'Permissões liberadas: Você pode adicionar, editar e excluir animais, divulgar feiras, reportar sumiços e postar no mural.'
+                  : 'Conecte sua conta real do Google para adicionar, editar ou excluir animais e publicar eventos ou alertas.'}
               </p>
             </div>
           </div>
@@ -560,10 +654,10 @@ export default function App() {
           {user ? (
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setShowModalAdocao(true)}
+                onClick={openNewAnimalModal}
                 className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
-                <PlusCircle className="w-4 h-4" /> Cadastrar Animal
+                <PlusCircle className="w-4 h-4" /> Adicionar Animal
               </button>
               <button
                 onClick={() => setShowModalEvento(true)}
@@ -587,15 +681,15 @@ export default function App() {
           ) : (
             <button
               onClick={handleLoginGoogle}
-              className="bg-emerald-800 hover:bg-emerald-900 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
+              disabled={loginBusy}
+              className="bg-emerald-800 hover:bg-emerald-900 disabled:opacity-60 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition cursor-pointer"
             >
               <img src="https://www.svgrepo.com/show/475656/google-color.svg" alt="Google" className="w-4 h-4" />
-              Entrar com Google
+              {loginBusy ? 'Abrindo Google...' : 'Entrar com Google'}
             </button>
           )}
         </div>
 
-        {/* ABA 1: MAPA DE CALOR */}
         {activeTab === 'mapa' && (
           <div className="space-y-4">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap justify-between items-center gap-4">
@@ -680,7 +774,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA 2: ADOÇÃO RESPONSÁVEL */}
         {activeTab === 'adocao' && (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
@@ -689,9 +782,19 @@ export default function App() {
                   <Filter className="w-5 h-5 text-emerald-700" />
                   Buscar Animais para Adoção
                 </h2>
-                <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full">
-                  {animaisFiltrados.length} Animais Disponíveis
-                </span>
+                <div className="flex items-center gap-2">
+                  {user && (
+                    <button
+                      onClick={openNewAnimalModal}
+                      className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 transition cursor-pointer"
+                    >
+                      <PlusCircle className="w-3.5 h-3.5" /> Adicionar Animal
+                    </button>
+                  )}
+                  <span className="text-xs bg-emerald-100 text-emerald-800 font-bold px-3 py-1 rounded-full">
+                    {animaisFiltrados.length} Animais Disponíveis
+                  </span>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -738,6 +841,24 @@ export default function App() {
                       <span className="absolute top-3 right-3 bg-emerald-800 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
                         {a.especie}
                       </span>
+                      {user && (
+                        <div className="absolute top-3 left-3 flex gap-1.5">
+                          <button
+                            onClick={() => openEditAnimalModal(a)}
+                            title="Editar animal"
+                            className="bg-white/95 hover:bg-blue-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteAnimal(a)}
+                            title="Excluir animal"
+                            className="bg-white/95 hover:bg-red-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="p-5 space-y-2">
@@ -759,7 +880,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="p-5 pt-0">
+                  <div className="p-5 pt-0 space-y-2">
                     <a
                       href={`https://wa.me/${a.contato}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
                       target="_blank"
@@ -768,6 +889,23 @@ export default function App() {
                     >
                       <Phone className="w-4 h-4" /> Entrar em Contato (WhatsApp)
                     </a>
+
+                    {user && (
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                          onClick={() => openEditAnimalModal(a)}
+                          className="w-full bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Pencil className="w-3.5 h-3.5" /> Editar
+                        </button>
+                        <button
+                          onClick={() => handleDeleteAnimal(a)}
+                          className="w-full bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> Excluir
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
@@ -775,7 +913,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA 3: INFORMAÇÕES SOBRE O CASTRAMÓVEL EM QUIXERAMOBIM */}
         {activeTab === 'castramovel' && (
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-6 sm:p-8 rounded-2xl shadow-md">
@@ -855,7 +992,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA 4: ACHADOS E PERDIDOS */}
         {activeTab === 'perdidos' && (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-wrap justify-between items-center gap-4">
@@ -921,7 +1057,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ABA 5: EVENTOS DE ADOÇÃO, VACINAÇÃO E MURAL */}
         {activeTab === 'eventos' && (
           <div className="space-y-6">
             <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
@@ -1047,13 +1182,21 @@ export default function App() {
         <p className="mt-0.5">UniCatólica - Centro Universitário Católica do Quixadá | Estudo de Caso: Quixeramobim-CE</p>
       </footer>
 
-      {/* MODAL 1: CADASTRAR ANIMAL PARA ADOÇÃO */}
       {showModalAdocao && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-lg text-slate-900">Cadastrar Animal para Adoção</h3>
-              <button onClick={() => setShowModalAdocao(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+              <h3 className="font-bold text-lg text-slate-900">
+                {editingAnimalId ? 'Editar Animal Cadastrado' : 'Adicionar Animal para Adoção'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowModalAdocao(false);
+                  setEditingAnimalId(null);
+                  setFormAdocao(EMPTY_ANIMAL_FORM);
+                }}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1109,19 +1252,23 @@ export default function App() {
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-700">URL da Foto (opcional)</label>
+                <input type="url" placeholder="https://..." value={formAdocao.foto} onChange={(e) => setFormAdocao({ ...formAdocao, foto: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700">WhatsApp para Contato (com DDD)</label>
                 <input type="text" placeholder="Ex: 5588999999999" required value={formAdocao.contato} onChange={(e) => setFormAdocao({ ...formAdocao, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
-                Publicar no Catálogo
+                {editingAnimalId ? 'Salvar Alterações' : 'Publicar no Catálogo'}
               </button>
             </form>
           </div>
         </div>
       )}
 
-      {/* MODAL 2: DIVULGAR EVENTO / FEIRA DE ADOÇÃO */}
       {showModalEvento && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1172,7 +1319,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 3: REPORTAR ANIMAL PERDIDO */}
       {showModalPerdido && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -1246,7 +1392,6 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL 4: POSTAR INTENÇÃO DE ADOÇÃO NO MURAL */}
       {showModalMural && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
