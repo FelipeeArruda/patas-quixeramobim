@@ -247,7 +247,7 @@ function computeDynamicHeatZones(baseZones, animaisList) {
   });
 }
 
-function compressImageToBase64(file, maxWidth = 720, quality = 0.72) {
+function compressImageToBase64(file, maxWidth = 480, quality = 0.55) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'));
@@ -588,7 +588,7 @@ export default function App() {
     if (!file) return;
     setProcessingPhotoAdocao(true);
     try {
-      const base64Image = await compressImageToBase64(file, 720, 0.72);
+      const base64Image = await compressImageToBase64(file, 480, 0.55);
       setFormAdocao((prev) => ({ ...prev, foto: base64Image }));
       showToast('📸 Foto anexada e otimizada com sucesso!');
     } catch (err) {
@@ -605,7 +605,7 @@ export default function App() {
     if (!file) return;
     setProcessingPhotoPerdido(true);
     try {
-      const base64Image = await compressImageToBase64(file, 720, 0.72);
+      const base64Image = await compressImageToBase64(file, 480, 0.55);
       setFormPerdido((prev) => ({ ...prev, foto: base64Image }));
       showToast('📸 Foto do pet anexada com sucesso!');
     } catch (err) {
@@ -784,7 +784,7 @@ export default function App() {
       const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'), novo);
       const itemCriado = { id: docRef.id, ...novo };
       setAnimaisAdocao((prev) => mergeUniqueById([itemCriado], prev));
-      showToast(`✅ "${formAdocao.nome}" cadastrado! +1 registro adicionado em ${formAdocao.bairro} no mapa.`);
+      showToast(`✅ "${formAdocao.nome}" cadastrado e salvo no Cloud Firestore!`);
     } catch (err) {
       console.error('Erro ao salvar animal no Firestore:', err);
       const itemLocal = { id: `local-${Date.now()}`, ...novo };
@@ -827,7 +827,7 @@ export default function App() {
     } catch (err) {
       console.warn('Salvamento local:', err.message);
       setAnimaisPerdidos((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
-      showToast('🚨 Alerta publicado.');
+      showToast(`⚠️ Alerta local (Firestore: ${err.code || err.message})`);
     }
 
     setShowModalPerdido(false);
@@ -855,7 +855,7 @@ export default function App() {
     } catch (err) {
       console.warn('Salvamento local:', err.message);
       setEventosAdocao((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
-      showToast('📅 Evento adicionado.');
+      showToast(`⚠️ Evento local (Firestore: ${err.code || err.message})`);
     }
 
     setShowModalEvento(false);
@@ -884,7 +884,7 @@ export default function App() {
     } catch (err) {
       console.warn('Salvamento local:', err.message);
       setPedidosMural((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
-      showToast('📢 Pedido publicado.');
+      showToast(`⚠️ Pedido local (Firestore: ${err.code || err.message})`);
     }
 
     setShowModalMural(false);
