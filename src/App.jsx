@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import {
   getAuth,
@@ -17,6 +17,7 @@ import {
   onSnapshot,
   serverTimestamp
 } from 'firebase/firestore';
+import L from 'leaflet';
 import {
   Heart,
   MapPin,
@@ -39,9 +40,12 @@ import {
   Clock,
   Info,
   Pencil,
-  Trash2
+  Trash2,
+  Camera,
+  ImagePlus
 } from 'lucide-react';
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 const firebaseConfig = {
   apiKey: "AIzaSyCNAvOw3Pr-82sAhuDmsEJOZzt0Shr55bU",
   authDomain: "patas-quixeramobim.firebaseapp.com",
@@ -57,13 +61,46 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'patas-quixeramobim-tcc';
 
+const QUIXERAMOBIM_CENTER = [-5.1979, -39.2925];
+
+const BAIRROS_QUIXERAMOBIM = [
+  'Centro',
+  'Edmilson Correia de Vasconcelos',
+  'Rodoviária',
+  'Sabonete',
+  'Pompéia',
+  'Entorno da Barragem',
+  'Jaime Lopes',
+  'Duque de Caxias',
+  'Maravilha',
+  'Monteiro de Moraes',
+  'Conjunto Habitacional',
+  'Depósito',
+  'Salviano Carlos',
+  'Humberto Bezerra',
+  'Vila Betânia',
+  'São José',
+  'Distritos / Zona Rural'
+];
+
 const INITIAL_HEAT_ZONES = [
-  { id: 1, bairro: 'Centro', top: '48%', left: '46%', size: '130px', color: 'rgba(239, 68, 68, 0.65)', nivel: 'Crítico (Alta Concentração)', ocorrencias: 18 },
-  { id: 2, bairro: 'Edmilson Correia de Vasconcelos', top: '58%', left: '56%', size: '150px', color: 'rgba(239, 68, 68, 0.65)', nivel: 'Crítico (Alta Concentração)', ocorrencias: 22 },
-  { id: 3, bairro: 'Rodoviária', top: '35%', left: '38%', size: '110px', color: 'rgba(245, 158, 11, 0.6)', nivel: 'Média Concentração', ocorrencias: 11 },
-  { id: 4, bairro: 'Sabonete', top: '38%', left: '30%', size: '100px', color: 'rgba(245, 158, 11, 0.6)', nivel: 'Média Concentração', ocorrencias: 9 },
-  { id: 5, bairro: 'Pompéia', top: '70%', left: '28%', size: '90px', color: 'rgba(59, 130, 246, 0.55)', nivel: 'Baixa / Monitoramento', ocorrencias: 4 },
-  { id: 6, bairro: 'Entorno da Barragem', top: '28%', left: '55%', size: '120px', color: 'rgba(239, 68, 68, 0.6)', nivel: 'Crítico (Descarte Recorrente)', ocorrencias: 15 }
+  { id: 1, bairro: 'Centro', lat: -5.1982, lng: -39.2923, baseOcorrencias: 18 },
+  { id: 2, bairro: 'Edmilson Correia de Vasconcelos', lat: -5.2055, lng: -39.2865, baseOcorrencias: 22 },
+  { id: 3, bairro: 'Rodoviária', lat: -5.1945, lng: -39.2985, baseOcorrencias: 11 },
+  { id: 4, bairro: 'Sabonete', lat: -5.1912, lng: -39.3028, baseOcorrencias: 9 },
+  { id: 5, bairro: 'Pompéia', lat: -5.2068, lng: -39.3012, baseOcorrencias: 4 },
+  { id: 6, bairro: 'Entorno da Barragem', lat: -5.1885, lng: -39.2880, baseOcorrencias: 15 },
+  { id: 7, bairro: 'Jaime Lopes', lat: -5.2022, lng: -39.2975, baseOcorrencias: 7 },
+  { id: 8, bairro: 'Duque de Caxias', lat: -5.1958, lng: -39.2875, baseOcorrencias: 6 },
+  { id: 9, bairro: 'Maravilha', lat: -5.2090, lng: -39.2925, baseOcorrencias: 8 },
+  { id: 10, bairro: 'Monteiro de Moraes', lat: -5.1920, lng: -39.2940, baseOcorrencias: 5 },
+  { id: 11, bairro: 'Conjunto Habitacional', lat: -5.2115, lng: -39.2890, baseOcorrencias: 10 },
+  { id: 12, bairro: 'Depósito', lat: -5.2005, lng: -39.2845, baseOcorrencias: 5 },
+  { id: 13, bairro: 'Salviano Carlos', lat: -5.1965, lng: -39.3045, baseOcorrencias: 4 },
+  { id: 14, bairro: 'Humberto Bezerra', lat: -5.2040, lng: -39.3040, baseOcorrencias: 6 },
+  { id: 15, bairro: 'Vila Betânia', lat: -5.1895, lng: -39.2975, baseOcorrencias: 5 },
+  { id: 16, bairro: 'São José', lat: -5.2082, lng: -39.2968, baseOcorrencias: 7 },
+  { id: 17, bairro: 'Distritos / Zona Rural', lat: -5.2160, lng: -39.3060, baseOcorrencias: 12 }
 ];
 
 const DEFAULT_ANIMAIS = [
@@ -78,7 +115,9 @@ const DEFAULT_ANIMAIS = [
     bairro: 'Centro',
     saude: 'Vacinado, Castrado e Vermifugado',
     tutor: 'Maria Socorro',
+    tutorUid: 'sistema-demo',
     contato: '5588999999999',
+    adotado: false,
     foto: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500'
   },
   {
@@ -89,10 +128,12 @@ const DEFAULT_ANIMAIS = [
     cor: 'Branco e Creme',
     porte: 'Pequeno',
     idade: '6 meses',
-    bairro: 'Edmilson Correia',
+    bairro: 'Edmilson Correia de Vasconcelos',
     saude: 'Vermifugada e Castrada',
     tutor: 'ONG Patas Amigas QXB',
+    tutorUid: 'sistema-demo',
     contato: '5588988887777',
+    adotado: false,
     foto: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&q=80&w=500'
   }
 ];
@@ -105,7 +146,7 @@ const DEFAULT_PERDIDOS = [
     raca: 'Poodle',
     cor: 'Branco',
     porte: 'Pequeno',
-    bairroSumico: 'Bairro Jaime Lopes',
+    bairroSumico: 'Jaime Lopes',
     dataSumico: '20/11/2026',
     descricao: 'Usa coleira azul. Muito dócil, atende pelo nome.',
     dono: 'Fernanda Oliveira',
@@ -129,7 +170,7 @@ const DEFAULT_EVENTOS = [
     titulo: 'Mutirão de Adoção no Bairro Edmilson Correia',
     data: '05/12/2026',
     horario: '15:00 às 18:00',
-    local: 'Praça da Igreja - Edmilson Correia',
+    local: 'Praça da Igreja - Edmilson Correia de Vasconcelos',
     organizador: 'Grupo Patas do Sertão',
     descricao: 'Evento comunitário com orientação veterinária gratuita e adoção de filhotes.'
   }
@@ -162,13 +203,208 @@ const EMPTY_ANIMAL_FORM = {
   foto: ''
 };
 
-function mergeUniqueById(firestoreDocs, fallbackDocs) {
+function mergeUniqueById(primaryDocs, fallbackDocs) {
   const map = new Map();
-  firestoreDocs.forEach((item) => map.set(item.id, item));
+  primaryDocs.forEach((item) => map.set(item.id, item));
   fallbackDocs.forEach((item) => {
     if (!map.has(item.id)) map.set(item.id, item);
   });
   return Array.from(map.values());
+}
+
+function computeDynamicHeatZones(baseZones, animaisList) {
+  const ativos = animaisList.filter((a) => !a.adotado && !String(a.id).startsWith('default-'));
+
+  return baseZones.map((zone) => {
+    const extrasNoBairro = ativos.filter(
+      (a) => (a.bairro || '').trim().toLowerCase() === zone.bairro.trim().toLowerCase()
+    ).length;
+
+    const total = Math.max(0, zone.baseOcorrencias + extrasNoBairro);
+
+    let nivel = 'Baixa / Monitoramento';
+    let color = '#3b82f6';
+    let radius = 210 + total * 5;
+
+    if (total >= 15) {
+      nivel = 'Crítico (Alta Concentração)';
+      color = '#ef4444';
+      radius = 330 + Math.min(total * 5, 130);
+    } else if (total >= 8) {
+      nivel = 'Média Concentração';
+      color = '#f59e0b';
+      radius = 260 + total * 5;
+    }
+
+    return {
+      ...zone,
+      ocorrencias: total,
+      extrasCadastrados: extrasNoBairro,
+      nivel,
+      color,
+      radius
+    };
+  });
+}
+
+// Redimensiona e comprime foto da galeria/câmera para caber com folga no Firestore
+function compressImageToBase64(file, maxWidth = 720, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo de imagem.'));
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Imagem inválida ou corrompida.'));
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width);
+          width = maxWidth;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedDataUrl);
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function QuixeramobimRealMap({ zones, selectedZoneId, onSelectZone }) {
+  const mapContainerRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const layerGroupRef = useRef(null);
+  const circlesByIdRef = useRef({});
+
+  useEffect(() => {
+    const cssId = 'leaflet-cdn-css';
+    if (!document.getElementById(cssId)) {
+      const link = document.createElement('link');
+      link.id = cssId;
+      link.rel = 'stylesheet';
+      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+      document.head.appendChild(link);
+    }
+
+    if (!mapContainerRef.current || mapInstanceRef.current) return;
+
+    const map = L.map(mapContainerRef.current, {
+      center: QUIXERAMOBIM_CENTER,
+      zoom: 14,
+      scrollWheelZoom: true
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors | Quixeramobim-CE',
+      maxZoom: 19
+    }).addTo(map);
+
+    layerGroupRef.current = L.layerGroup().addTo(map);
+    mapInstanceRef.current = map;
+
+    const resizeTimer = setTimeout(() => {
+      map.invalidateSize();
+    }, 200);
+
+    return () => {
+      clearTimeout(resizeTimer);
+      map.remove();
+      mapInstanceRef.current = null;
+      layerGroupRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!mapInstanceRef.current || !layerGroupRef.current) return;
+
+    layerGroupRef.current.clearLayers();
+    circlesByIdRef.current = {};
+
+    zones.forEach((z) => {
+      L.circle([z.lat, z.lng], {
+        radius: z.radius * 1.4,
+        color: 'transparent',
+        fillColor: z.color,
+        fillOpacity: 0.2
+      }).addTo(layerGroupRef.current);
+
+      const coreCircle = L.circle([z.lat, z.lng], {
+        radius: z.radius * 0.85,
+        color: z.color,
+        weight: 2,
+        fillColor: z.color,
+        fillOpacity: 0.46
+      }).addTo(layerGroupRef.current);
+
+      coreCircle.bindPopup(`
+        <div style="font-family: sans-serif; min-width: 205px;">
+          <strong style="font-size: 13px; color: #064e3b;">Bairro: ${z.bairro}</strong><br/>
+          <span style="font-size: 11px; color: #334155;"><b>Nível:</b> ${z.nivel}</span><br/>
+          <span style="font-size: 11px; color: #334155;"><b>Total mapeado:</b> ${z.ocorrencias} animais</span>
+          ${z.extrasCadastrados > 0 ? `<br/><span style="font-size: 11px; color: #047857;"><b>+${z.extrasCadastrados} cadastrado(s) na plataforma</b></span>` : ''}
+        </div>
+      `);
+
+      coreCircle.on('click', () => {
+        onSelectZone(z.id);
+      });
+
+      circlesByIdRef.current[z.id] = coreCircle;
+
+      const badgeIcon = L.divIcon({
+        className: 'custom-qxb-pin',
+        html: `
+          <div style="
+            background: rgba(15, 23, 42, 0.92);
+            color: #ffffff;
+            border: 1.5px solid ${z.color};
+            border-radius: 9999px;
+            padding: 3px 8px;
+            font-size: 10px;
+            font-weight: 700;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            transform: translate(-50%, -50%);
+            display: inline-block;
+          ">
+            ${z.bairro} (${z.ocorrencias})
+          </div>
+        `,
+        iconSize: [0, 0]
+      });
+
+      const marker = L.marker([z.lat, z.lng], { icon: badgeIcon }).addTo(layerGroupRef.current);
+      marker.on('click', () => {
+        onSelectZone(z.id);
+        coreCircle.openPopup();
+      });
+    });
+  }, [zones, onSelectZone]);
+
+  useEffect(() => {
+    if (!selectedZoneId || !mapInstanceRef.current) return;
+    const target = zones.find((z) => z.id === selectedZoneId);
+    if (target) {
+      mapInstanceRef.current.flyTo([target.lat, target.lng], 15, { duration: 0.8 });
+      const circle = circlesByIdRef.current[target.id];
+      if (circle) circle.openPopup();
+    }
+  }, [selectedZoneId, zones]);
+
+  return (
+    <div className="relative h-[500px] w-full rounded-2xl overflow-hidden shadow-md border border-slate-300 z-10">
+      <div ref={mapContainerRef} className="w-full h-full" />
+      <div className="absolute bottom-3 left-3 z-[400] bg-slate-900/90 backdrop-blur-md text-white text-xs p-3 rounded-xl border border-slate-700 pointer-events-none">
+        <p className="font-bold text-emerald-400">Quixeramobim - Ceará (OpenStreetMap)</p>
+        <p className="text-[11px] text-slate-300">Atualizado em tempo real conforme cadastros e adoções por bairro</p>
+      </div>
+    </div>
+  );
 }
 
 export default function App() {
@@ -179,10 +415,14 @@ export default function App() {
 
   const [showModalAdocao, setShowModalAdocao] = useState(false);
   const [editingAnimalId, setEditingAnimalId] = useState(null);
+  const [processingPhotoAdocao, setProcessingPhotoAdocao] = useState(false);
+
   const [showModalPerdido, setShowModalPerdido] = useState(false);
+  const [processingPhotoPerdido, setProcessingPhotoPerdido] = useState(false);
+
   const [showModalMural, setShowModalMural] = useState(false);
   const [showModalEvento, setShowModalEvento] = useState(false);
-  const [selectedZone, setSelectedZone] = useState(null);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
 
   const [toastMessage, setToastMessage] = useState(null);
 
@@ -209,10 +449,24 @@ export default function App() {
     especieDesejada: 'Cão', porteDesejado: 'Médio', racaPreferencial: '', bairroMoradia: 'Centro', descricao: '', contato: ''
   });
 
+  const galleryAdocaoRef = useRef(null);
+  const cameraAdocaoRef = useRef(null);
+  const galleryPerdidoRef = useRef(null);
+  const cameraPerdidoRef = useRef(null);
+
   const showToast = (msg) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 5500);
   };
+
+  const isOwnerOfAnimal = (animal) => {
+    if (!user || !animal) return false;
+    return Boolean(animal.tutorUid && animal.tutorUid === user.uid);
+  };
+
+  const dynamicHeatZones = computeDynamicHeatZones(INITIAL_HEAT_ZONES, animaisAdocao);
+  const selectedZone = dynamicHeatZones.find((z) => z.id === selectedZoneId) || null;
+  const animaisDisponiveis = animaisAdocao.filter((a) => !a.adotado);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -236,10 +490,19 @@ export default function App() {
     const unsubAdocao = onSnapshot(
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'),
       (snapshot) => {
-        const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setAnimaisAdocao(mergeUniqueById(docs, DEFAULT_ANIMAIS));
+        const docs = snapshot.docs.map((d) => ({
+          id: d.id,
+          ...d.data()
+        }));
+        setAnimaisAdocao((prev) => {
+          const locaisPendentes = prev.filter((item) => String(item.id).startsWith('local-'));
+          return mergeUniqueById([...locaisPendentes, ...docs], DEFAULT_ANIMAIS);
+        });
       },
-      (err) => console.warn('Firestore Adoção:', err.message)
+      (err) => {
+        console.error('Erro ao ler animais_adocao no Firestore:', err);
+        showToast(`⚠️ Aviso ao ler banco: ${err.message}`);
+      }
     );
 
     const unsubPerdidos = onSnapshot(
@@ -291,15 +554,13 @@ export default function App() {
       console.error('Erro detalhado Google Auth:', error);
       const code = error?.code || '';
       if (code.includes('api-key-not-valid')) {
-        showToast('⚠️ Chave de API rejeitada pelo Google (auth/api-key-not-valid). Confira em Credenciais do Google Cloud / Configurações do projeto no Firebase.');
+        showToast('⚠️ Chave de API rejeitada pelo Google (auth/api-key-not-valid).');
       } else if (code === 'auth/unauthorized-domain') {
-        showToast(`⚠️ Domínio "${window.location.hostname}" não autorizado no Firebase (Authentication > Settings > Authorized domains).`);
+        showToast(`⚠️ Domínio "${window.location.hostname}" não autorizado no Firebase.`);
       } else if (code === 'auth/popup-blocked') {
-        showToast('⚠️ Popup bloqueado pelo navegador. Permita popups para este site e tente de novo.');
+        showToast('⚠️ Popup bloqueado pelo navegador. Permita popups para este site.');
       } else if (code === 'auth/popup-closed-by-user') {
         showToast('Janela de login fechada antes da conclusão.');
-      } else if (code === 'auth/operation-not-allowed') {
-        showToast('⚠️ Ative o provedor Google em Firebase Console > Authentication > Sign-in method.');
       } else {
         showToast(`❌ Falha no login Google (${code || 'erro'}): ${error.message}`);
       }
@@ -323,6 +584,40 @@ export default function App() {
     }
   };
 
+  const handlePhotoFileAdocao = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProcessingPhotoAdocao(true);
+    try {
+      const base64Image = await compressImageToBase64(file, 720, 0.72);
+      setFormAdocao((prev) => ({ ...prev, foto: base64Image }));
+      showToast('📸 Foto anexada e otimizada com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Não foi possível processar esta foto. Tente outra imagem.');
+    } finally {
+      setProcessingPhotoAdocao(false);
+      e.target.value = '';
+    }
+  };
+
+  const handlePhotoFilePerdido = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProcessingPhotoPerdido(true);
+    try {
+      const base64Image = await compressImageToBase64(file, 720, 0.72);
+      setFormPerdido((prev) => ({ ...prev, foto: base64Image }));
+      showToast('📸 Foto do pet anexada com sucesso!');
+    } catch (err) {
+      console.error(err);
+      showToast('⚠️ Não foi possível processar esta foto. Tente outra imagem.');
+    } finally {
+      setProcessingPhotoPerdido(false);
+      e.target.value = '';
+    }
+  };
+
   const openNewAnimalModal = () => {
     if (!user) {
       showToast('🔒 Entre com sua conta Google para cadastrar animais.');
@@ -335,7 +630,11 @@ export default function App() {
 
   const openEditAnimalModal = (animal) => {
     if (!user) {
-      showToast('🔒 Entre com sua conta Google para editar animais.');
+      showToast('🔒 Entre com sua conta Google para editar.');
+      return;
+    }
+    if (!isOwnerOfAnimal(animal)) {
+      showToast('⛔ Você só pode editar animais cadastrados pela sua própria conta.');
       return;
     }
     setEditingAnimalId(animal.id);
@@ -346,7 +645,7 @@ export default function App() {
       cor: animal.cor || '',
       porte: animal.porte || 'Médio',
       idade: animal.idade || '',
-      bairro: animal.bairro || 'Centro',
+      bairro: BAIRROS_QUIXERAMOBIM.includes(animal.bairro) ? animal.bairro : 'Centro',
       saude: animal.saude || '',
       contato: animal.contato || '',
       foto: animal.foto || ''
@@ -354,19 +653,60 @@ export default function App() {
     setShowModalAdocao(true);
   };
 
-  const handleDeleteAnimal = async (animal) => {
+  const handleMarkAsAdopted = async (animal) => {
     if (!user) {
-      showToast('🔒 Entre com sua conta Google para excluir animais.');
+      showToast('🔒 Entre com sua conta Google para atualizar o status.');
       return;
     }
-    const confirmar = window.confirm(`Deseja realmente excluir "${animal.nome}" do catálogo de adoção?`);
+    if (!isOwnerOfAnimal(animal)) {
+      showToast('⛔ Apenas o responsável que cadastrou pode marcar este animal como adotado.');
+      return;
+    }
+
+    const confirmar = window.confirm(
+      `Confirmar que "${animal.nome}" foi adotado? O contador do bairro ${animal.bairro} no mapa será reduzido automaticamente.`
+    );
+    if (!confirmar) return;
+
+    const isFirestoreDoc = !String(animal.id).startsWith('default-') && !String(animal.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_adocao', animal.id), {
+          adotado: true,
+          adotadoEm: serverTimestamp()
+        });
+        showToast(`💚 "${animal.nome}" marcado como adotado! Mapa do bairro ${animal.bairro} atualizado.`);
+        return;
+      } catch (err) {
+        console.warn('Erro ao marcar adotado no Firestore:', err.message);
+      }
+    }
+
+    setAnimaisAdocao((prev) =>
+      prev.map((item) => (item.id === animal.id ? { ...item, adotado: true } : item))
+    );
+    showToast(`💚 "${animal.nome}" marcado como adotado! Mapa do bairro ${animal.bairro} atualizado.`);
+  };
+
+  const handleDeleteAnimal = async (animal) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para excluir.');
+      return;
+    }
+    if (!isOwnerOfAnimal(animal)) {
+      showToast('⛔ Você só pode excluir animais cadastrados pela sua própria conta.');
+      return;
+    }
+    const confirmar = window.confirm(
+      `Deseja realmente excluir "${animal.nome}"? O contador do bairro ${animal.bairro} no mapa também será atualizado.`
+    );
     if (!confirmar) return;
 
     const isFirestoreDoc = !String(animal.id).startsWith('default-') && !String(animal.id).startsWith('local-');
     if (isFirestoreDoc) {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_adocao', animal.id));
-        showToast(`🗑️ "${animal.nome}" removido do Cloud Firestore.`);
+        showToast(`🗑️ "${animal.nome}" excluído e contador de ${animal.bairro} atualizado.`);
         return;
       } catch (err) {
         console.warn('Erro ao excluir no Firestore:', err.message);
@@ -374,7 +714,7 @@ export default function App() {
     }
 
     setAnimaisAdocao((prev) => prev.filter((item) => item.id !== animal.id));
-    showToast(`🗑️ "${animal.nome}" removido da lista.`);
+    showToast(`🗑️ "${animal.nome}" removido e contador de ${animal.bairro} atualizado.`);
   };
 
   const handleSubmitAdocao = async (e) => {
@@ -384,31 +724,46 @@ export default function App() {
       return;
     }
 
-    const fotoFinal = formAdocao.foto.trim() || 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500';
+    const fotoLimpa = (formAdocao.foto || '').trim();
+    const isValidPhoto = fotoLimpa.startsWith('http') || fotoLimpa.startsWith('data:image/');
+    const fotoFinal = isValidPhoto
+      ? fotoLimpa
+      : 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500';
 
     if (editingAnimalId) {
+      const alvo = animaisAdocao.find((item) => item.id === editingAnimalId);
+      if (!alvo || !isOwnerOfAnimal(alvo)) {
+        showToast('⛔ Permissão negada: apenas o autor do cadastro pode editar este animal.');
+        setShowModalAdocao(false);
+        setEditingAnimalId(null);
+        return;
+      }
+
       const dadosAtualizados = {
         ...formAdocao,
         foto: fotoFinal,
-        atualizadoEm: serverTimestamp(),
-        atualizadoPorEmail: user.email
+        tutorUid: user.uid,
+        atualizadoEm: serverTimestamp()
       };
 
       const isFirestoreDoc = !String(editingAnimalId).startsWith('default-') && !String(editingAnimalId).startsWith('local-');
       if (isFirestoreDoc) {
         try {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_adocao', editingAnimalId), dadosAtualizados);
-          showToast(`✏️ Dados de "${formAdocao.nome}" atualizados no Cloud Firestore!`);
+          showToast(`✏️ Dados de "${formAdocao.nome}" atualizados! Mapa sincronizado.`);
         } catch (err) {
-          console.warn('Atualização local:', err.message);
+          console.error('Erro ao atualizar no Firestore:', err);
           setAnimaisAdocao((prev) => prev.map((item) => (item.id === editingAnimalId ? { ...item, ...dadosAtualizados } : item)));
-          showToast(`✏️ Dados de "${formAdocao.nome}" atualizados.`);
+          showToast(`⚠️ Atualizado na tela (Firestore: ${err.code || err.message})`);
         }
       } else {
         setAnimaisAdocao((prev) => prev.map((item) => (item.id === editingAnimalId ? { ...item, ...dadosAtualizados } : item)));
         showToast(`✏️ Dados de "${formAdocao.nome}" atualizados.`);
       }
 
+      setFiltroEspecie('Todos');
+      setFiltroPorte('Todos');
+      setFiltroBusca('');
       setShowModalAdocao(false);
       setEditingAnimalId(null);
       setFormAdocao(EMPTY_ANIMAL_FORM);
@@ -419,6 +774,7 @@ export default function App() {
     const novo = {
       ...formAdocao,
       foto: fotoFinal,
+      adotado: false,
       tutor: user.displayName,
       tutorUid: user.uid,
       tutorEmail: user.email,
@@ -426,14 +782,20 @@ export default function App() {
     };
 
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'), novo);
-      showToast('✅ Animal cadastrado no Cloud Firestore!');
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_adocao'), novo);
+      const itemCriado = { id: docRef.id, ...novo };
+      setAnimaisAdocao((prev) => mergeUniqueById([itemCriado], prev));
+      showToast(`✅ "${formAdocao.nome}" cadastrado! +1 registro adicionado em ${formAdocao.bairro} no mapa.`);
     } catch (err) {
-      console.warn('Salvamento local:', err.message);
-      setAnimaisAdocao((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
-      showToast('✅ Animal adicionado no catálogo.');
+      console.error('Erro ao salvar animal no Firestore:', err);
+      const itemLocal = { id: `local-${Date.now()}`, ...novo };
+      setAnimaisAdocao((prev) => [itemLocal, ...prev]);
+      showToast(`⚠️ Card exibido, mas Firestore retornou: ${err.code || err.message}`);
     }
 
+    setFiltroEspecie('Todos');
+    setFiltroPorte('Todos');
+    setFiltroBusca('');
     setShowModalAdocao(false);
     setFormAdocao(EMPTY_ANIMAL_FORM);
     setActiveTab('adocao');
@@ -446,12 +808,18 @@ export default function App() {
       return;
     }
 
+    const fotoLimpa = (formPerdido.foto || '').trim();
+    const isValidPhoto = fotoLimpa.startsWith('http') || fotoLimpa.startsWith('data:image/');
+    const fotoFinal = isValidPhoto
+      ? fotoLimpa
+      : 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=500';
+
     const novo = {
       ...formPerdido,
+      foto: fotoFinal,
       dono: user.displayName,
       donoUid: user.uid,
-      criadoEm: serverTimestamp(),
-      foto: formPerdido.foto || 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=500'
+      criadoEm: serverTimestamp()
     };
 
     try {
@@ -525,7 +893,7 @@ export default function App() {
     setActiveTab('eventos');
   };
 
-  const animaisFiltrados = animaisAdocao.filter((a) => {
+  const animaisFiltrados = animaisDisponiveis.filter((a) => {
     const matchEspecie = filtroEspecie === 'Todos' || a.especie === filtroEspecie;
     const matchPorte = filtroPorte === 'Todos' || a.porte === filtroPorte;
     const busca = filtroBusca.toLowerCase();
@@ -541,13 +909,13 @@ export default function App() {
     <div className="min-h-screen bg-slate-100 text-slate-800 flex flex-col font-sans">
 
       {toastMessage && (
-        <div className="fixed top-4 right-4 z-50 bg-emerald-950 text-emerald-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-emerald-600 max-w-md">
+        <div className="fixed top-4 right-4 z-[999] bg-emerald-950 text-emerald-100 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 border border-emerald-600 max-w-md">
           <Sparkles className="w-5 h-5 text-emerald-400 shrink-0" />
           <span className="text-xs sm:text-sm font-semibold">{toastMessage}</span>
         </div>
       )}
 
-      <header className="bg-emerald-800 text-white shadow-lg sticky top-0 z-40">
+      <header className="bg-emerald-800 text-white shadow-lg sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
 
           <div className="flex items-center gap-3">
@@ -645,8 +1013,8 @@ export default function App() {
               </h3>
               <p className="text-xs text-slate-500">
                 {user
-                  ? 'Permissões liberadas: Você pode adicionar, editar e excluir animais, divulgar feiras, reportar sumiços e postar no mural.'
-                  : 'Conecte sua conta real do Google para adicionar, editar ou excluir animais e publicar eventos ou alertas.'}
+                  ? 'Permissões liberadas: Cadastre animais com foto/câmera, atualize o mapa por bairro e gerencie seus próprios registros.'
+                  : 'Conecte sua conta real do Google para cadastrar animais e gerenciar seus próprios anúncios.'}
               </p>
             </div>
           </div>
@@ -696,67 +1064,46 @@ export default function App() {
               <div>
                 <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <MapPin className="w-5 h-5 text-emerald-700" />
-                  Mapa de Densidade de Abandono em Quixeramobim-CE
+                  Mapa Real de Densidade de Abandono em Quixeramobim-CE
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  As manchas térmicas indicam os bairros com maior incidência de animais abandonados ou em situação de vulnerabilidade.
+                  Cada novo animal cadastrado soma +1 no bairro selecionado; ao ser adotado ou removido, o índice diminui automaticamente.
                 </p>
               </div>
               <div className="flex items-center gap-3 text-xs font-semibold">
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Crítico</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Moderado</span>
-                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500 inline-block"></span> Baixo</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-500 inline-block"></span> Crítico (15+)</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> Moderado (8-14)</span>
+                <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-500 inline-block"></span> Baixo (0-7)</span>
               </div>
             </div>
 
-            <div className="h-[500px] w-full rounded-2xl overflow-hidden shadow-md border border-slate-300 bg-slate-800 relative">
-              <svg className="w-full h-full opacity-40 stroke-slate-500" xmlns="http://www.w3.org/2000/svg">
-                <defs>
-                  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="1" />
-                  </pattern>
-                </defs>
-                <rect width="100%" height="100%" fill="url(#grid)" />
-                <path d="M 0 260 Q 300 240 700 280 T 1200 260" fill="none" stroke="#64748b" strokeWidth="8" />
-                <path d="M 450 0 Q 480 300 460 600" fill="none" stroke="#64748b" strokeWidth="6" />
-              </svg>
+            <QuixeramobimRealMap
+              zones={dynamicHeatZones}
+              selectedZoneId={selectedZoneId}
+              onSelectZone={setSelectedZoneId}
+            />
 
-              <div className="absolute top-4 left-4 bg-slate-900/85 backdrop-blur-md text-white text-xs p-3 rounded-xl border border-slate-700">
-                <p className="font-bold text-emerald-400">Quixeramobim - Ceará</p>
-                <p className="text-[11px] text-slate-300">Clique em uma mancha térmica para ver detalhes do bairro</p>
-              </div>
-
-              {INITIAL_HEAT_ZONES.map((z) => (
-                <div
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              {dynamicHeatZones.map((z) => (
+                <button
                   key={z.id}
-                  onClick={() => setSelectedZone(z)}
-                  style={{
-                    top: z.top,
-                    left: z.left,
-                    width: z.size,
-                    height: z.size,
-                    backgroundColor: z.color,
-                    transform: 'translate(-50%, -50%)',
-                    filter: 'blur(16px)'
-                  }}
-                  className="absolute rounded-full cursor-pointer hover:scale-125 transition duration-300 animate-pulse"
-                />
-              ))}
-
-              {INITIAL_HEAT_ZONES.map((z) => (
-                <div
-                  key={'pin-' + z.id}
-                  onClick={() => setSelectedZone(z)}
-                  style={{ top: z.top, left: z.left, transform: 'translate(-50%, -50%)' }}
-                  className="absolute cursor-pointer flex flex-col items-center group z-20"
+                  onClick={() => setSelectedZoneId(z.id)}
+                  className={`p-3 rounded-xl border text-left transition cursor-pointer ${
+                    selectedZoneId === z.id
+                      ? 'bg-emerald-900 text-white border-emerald-700 shadow'
+                      : 'bg-white hover:bg-slate-50 text-slate-800 border-slate-200'
+                  }`}
                 >
-                  <div className="w-6 h-6 rounded-full bg-slate-900 border-2 border-white flex items-center justify-center shadow-lg group-hover:scale-110 transition">
-                    <MapPin className="w-3.5 h-3.5 text-emerald-400" />
-                  </div>
-                  <span className="bg-slate-900/90 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow border border-slate-700 mt-1 whitespace-nowrap">
-                    {z.bairro} ({z.ocorrencias})
-                  </span>
-                </div>
+                  <p className="text-xs font-bold truncate">{z.bairro}</p>
+                  <p className={`text-[11px] mt-0.5 flex items-center justify-between ${selectedZoneId === z.id ? 'text-emerald-300' : 'text-slate-500'}`}>
+                    <span>{z.ocorrencias} registros</span>
+                    {z.extrasCadastrados > 0 && (
+                      <span className="bg-emerald-600 text-white text-[9px] font-bold px-1.5 py-0.2 rounded-full">
+                        +{z.extrasCadastrados}
+                      </span>
+                    )}
+                  </p>
+                </button>
               ))}
             </div>
 
@@ -764,9 +1111,14 @@ export default function App() {
               <div className="bg-slate-900 text-white p-4 rounded-2xl border border-slate-700 flex justify-between items-center">
                 <div>
                   <h4 className="font-bold text-emerald-400">Bairro: {selectedZone.bairro}</h4>
-                  <p className="text-xs text-slate-300">Classificação: <strong>{selectedZone.nivel}</strong> | Registros mapeados: <strong>{selectedZone.ocorrencias} animais</strong></p>
+                  <p className="text-xs text-slate-300">
+                    Classificação: <strong>{selectedZone.nivel}</strong> | Total mapeado: <strong>{selectedZone.ocorrencias} animais</strong>
+                    {selectedZone.extrasCadastrados > 0 && (
+                      <span className="text-emerald-300"> ({selectedZone.baseOcorrencias} base + {selectedZone.extrasCadastrados} ativo(s) no sistema)</span>
+                    )}
+                  </p>
                 </div>
-                <button onClick={() => setSelectedZone(null)} className="text-slate-300 hover:text-white text-xs bg-slate-800 px-3 py-1.5 rounded-lg cursor-pointer">
+                <button onClick={() => setSelectedZoneId(null)} className="text-slate-300 hover:text-white text-xs bg-slate-800 px-3 py-1.5 rounded-lg cursor-pointer">
                   Fechar
                 </button>
               </div>
@@ -833,82 +1185,100 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {animaisFiltrados.map((a) => (
-                <div key={a.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between">
-                  <div>
-                    <div className="relative">
-                      <img src={a.foto} alt={a.nome} className="w-full h-52 object-cover" />
-                      <span className="absolute top-3 right-3 bg-emerald-800 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
-                        {a.especie}
-                      </span>
-                      {user && (
-                        <div className="absolute top-3 left-3 flex gap-1.5">
+              {animaisFiltrados.map((a) => {
+                const podeGerenciar = isOwnerOfAnimal(a);
+                return (
+                  <div key={a.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between">
+                    <div>
+                      <div className="relative">
+                        <img src={a.foto} alt={a.nome} className="w-full h-52 object-cover" />
+                        <span className="absolute top-3 right-3 bg-emerald-800 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
+                          {a.especie}
+                        </span>
+                        {podeGerenciar && (
+                          <div className="absolute top-3 left-3 flex gap-1.5">
+                            <button
+                              onClick={() => openEditAnimalModal(a)}
+                              title="Editar meu cadastro"
+                              className="bg-white/95 hover:bg-blue-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAnimal(a)}
+                              title="Excluir meu cadastro"
+                              className="bg-white/95 hover:bg-red-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-5 space-y-2">
+                        <div className="flex justify-between items-center">
+                          <h3 className="text-xl font-bold text-slate-900">{a.nome}</h3>
+                          <span className="text-xs font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border">
+                            Porte {a.porte}
+                          </span>
+                        </div>
+
+                        <p className="text-xs text-slate-600"><strong>Raça:</strong> {a.raca}</p>
+                        <p className="text-xs text-slate-600"><strong>Cor:</strong> {a.cor} | <strong>Idade:</strong> {a.idade}</p>
+                        <p className="text-xs text-slate-600"><strong>Bairro:</strong> {a.bairro}</p>
+                        <p className="text-xs text-slate-600 flex items-center gap-1.5">
+                          <span><strong>Responsável:</strong> {a.tutor}</span>
+                          {podeGerenciar && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                              Seu cadastro
+                            </span>
+                          )}
+                        </p>
+
+                        <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-xs text-emerald-900 mt-2">
+                          <strong>Saúde / Vacinação:</strong> {a.saude}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-5 pt-0 space-y-2">
+                      <a
+                        href={`https://wa.me/${a.contato}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
+                      >
+                        <Phone className="w-4 h-4" /> Entrar em Contato (WhatsApp)
+                      </a>
+
+                      {podeGerenciar && (
+                        <div className="space-y-1.5 pt-1">
                           <button
-                            onClick={() => openEditAnimalModal(a)}
-                            title="Editar animal"
-                            className="bg-white/95 hover:bg-blue-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                            onClick={() => handleMarkAsAdopted(a)}
+                            className="w-full bg-amber-50 hover:bg-amber-500 text-amber-900 hover:text-white border border-amber-300 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
                           >
-                            <Pencil className="w-3.5 h-3.5" />
+                            <Heart className="w-3.5 h-3.5" /> Marcar como Adotado (-1 no Mapa)
                           </button>
-                          <button
-                            onClick={() => handleDeleteAnimal(a)}
-                            title="Excluir animal"
-                            className="bg-white/95 hover:bg-red-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => openEditAnimalModal(a)}
+                              className="w-full bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" /> Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeleteAnimal(a)}
+                              className="w-full bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Excluir
+                            </button>
+                          </div>
                         </div>
                       )}
                     </div>
-
-                    <div className="p-5 space-y-2">
-                      <div className="flex justify-between items-center">
-                        <h3 className="text-xl font-bold text-slate-900">{a.nome}</h3>
-                        <span className="text-xs font-semibold bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md border">
-                          Porte {a.porte}
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-slate-600"><strong>Raça:</strong> {a.raca}</p>
-                      <p className="text-xs text-slate-600"><strong>Cor:</strong> {a.cor} | <strong>Idade:</strong> {a.idade}</p>
-                      <p className="text-xs text-slate-600"><strong>Bairro:</strong> {a.bairro}</p>
-                      <p className="text-xs text-slate-600"><strong>Responsável:</strong> {a.tutor}</p>
-
-                      <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200 text-xs text-emerald-900 mt-2">
-                        <strong>Saúde / Vacinação:</strong> {a.saude}
-                      </div>
-                    </div>
                   </div>
-
-                  <div className="p-5 pt-0 space-y-2">
-                    <a
-                      href={`https://wa.me/${a.contato}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
-                    >
-                      <Phone className="w-4 h-4" /> Entrar em Contato (WhatsApp)
-                    </a>
-
-                    {user && (
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        <button
-                          onClick={() => openEditAnimalModal(a)}
-                          className="w-full bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                        >
-                          <Pencil className="w-3.5 h-3.5" /> Editar
-                        </button>
-                        <button
-                          onClick={() => handleDeleteAnimal(a)}
-                          className="w-full bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" /> Excluir
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -1183,11 +1553,11 @@ export default function App() {
       </footer>
 
       {showModalAdocao && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">
-                {editingAnimalId ? 'Editar Animal Cadastrado' : 'Adicionar Animal para Adoção'}
+                {editingAnimalId ? 'Editar Meu Animal Cadastrado' : 'Adicionar Animal para Adoção'}
               </h3>
               <button
                 onClick={() => {
@@ -1242,7 +1612,15 @@ export default function App() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Bairro em Quixeramobim</label>
-                  <input type="text" required value={formAdocao.bairro} onChange={(e) => setFormAdocao({ ...formAdocao, bairro: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <select
+                    value={formAdocao.bairro}
+                    onChange={(e) => setFormAdocao({ ...formAdocao, bairro: e.target.value })}
+                    className="mt-1 w-full p-2 border rounded-xl text-xs bg-white"
+                  >
+                    {BAIRROS_QUIXERAMOBIM.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -1251,9 +1629,70 @@ export default function App() {
                 <input type="text" required value={formAdocao.saude} onChange={(e) => setFormAdocao({ ...formAdocao, saude: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700">URL da Foto (opcional)</label>
-                <input type="url" placeholder="https://..." value={formAdocao.foto} onChange={(e) => setFormAdocao({ ...formAdocao, foto: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2.5">
+                <label className="block text-xs font-bold text-slate-700">Foto do Animal (Galeria, Câmera ou Link)</label>
+
+                <input
+                  ref={galleryAdocaoRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handlePhotoFileAdocao}
+                  className="hidden"
+                />
+                <input
+                  ref={cameraAdocaoRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handlePhotoFileAdocao}
+                  className="hidden"
+                />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => galleryAdocaoRef.current?.click()}
+                    disabled={processingPhotoAdocao}
+                    className="bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    {processingPhotoAdocao ? 'Processando...' : 'Anexar Foto'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraAdocaoRef.current?.click()}
+                    disabled={processingPhotoAdocao}
+                    className="bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4" />
+                    {processingPhotoAdocao ? 'Processando...' : 'Abrir Câmera'}
+                  </button>
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Ou cole uma URL de imagem (https://...)"
+                  value={formAdocao.foto.startsWith('data:image/') ? '' : formAdocao.foto}
+                  onChange={(e) => setFormAdocao({ ...formAdocao, foto: e.target.value })}
+                  className="w-full p-2 border rounded-xl text-xs bg-white"
+                />
+
+                {formAdocao.foto && (
+                  <div className="relative rounded-xl overflow-hidden border border-slate-300">
+                    <img
+                      src={formAdocao.foto}
+                      alt="Pré-visualização do animal"
+                      className="w-full h-36 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setFormAdocao({ ...formAdocao, foto: '' })}
+                      className="absolute top-2 right-2 bg-slate-900/80 hover:bg-red-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-lg transition cursor-pointer"
+                    >
+                      Remover foto
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1261,8 +1700,12 @@ export default function App() {
                 <input type="text" placeholder="Ex: 5588999999999" required value={formAdocao.contato} onChange={(e) => setFormAdocao({ ...formAdocao, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
-              <button type="submit" className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
-                {editingAnimalId ? 'Salvar Alterações' : 'Publicar no Catálogo'}
+              <button
+                type="submit"
+                disabled={processingPhotoAdocao}
+                className="w-full bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer"
+              >
+                {editingAnimalId ? 'Salvar Alterações' : 'Publicar no Catálogo (+1 no Mapa)'}
               </button>
             </form>
           </div>
@@ -1270,7 +1713,7 @@ export default function App() {
       )}
 
       {showModalEvento && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Divulgar Evento de Adoção</h3>
@@ -1320,7 +1763,7 @@ export default function App() {
       )}
 
       {showModalPerdido && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Publicar Alerta de Animal Perdido</h3>
@@ -1366,12 +1809,47 @@ export default function App() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Bairro do Desaparecimento</label>
-                  <input type="text" required value={formPerdido.bairroSumico} onChange={(e) => setFormPerdido({ ...formPerdido, bairroSumico: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                  <select
+                    value={formPerdido.bairroSumico}
+                    onChange={(e) => setFormPerdido({ ...formPerdido, bairroSumico: e.target.value })}
+                    className="mt-1 w-full p-2 border rounded-xl text-xs bg-white"
+                  >
+                    {BAIRROS_QUIXERAMOBIM.map((b) => (
+                      <option key={b} value={b}>{b}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-700">Data do Sumiço</label>
                   <input type="text" placeholder="DD/MM/AAAA" required value={formPerdido.dataSumico} onChange={(e) => setFormPerdido({ ...formPerdido, dataSumico: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
                 </div>
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-2">
+                <label className="block text-xs font-bold text-slate-700">Foto do Pet Desaparecido</label>
+                <input ref={galleryPerdidoRef} type="file" accept="image/*" onChange={handlePhotoFilePerdido} className="hidden" />
+                <input ref={cameraPerdidoRef} type="file" accept="image/*" capture="environment" onChange={handlePhotoFilePerdido} className="hidden" />
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => galleryPerdidoRef.current?.click()}
+                    disabled={processingPhotoPerdido}
+                    className="bg-white hover:bg-red-50 text-red-700 border border-red-200 font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <ImagePlus className="w-4 h-4" /> Anexar Foto
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraPerdidoRef.current?.click()}
+                    disabled={processingPhotoPerdido}
+                    className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4" /> Abrir Câmera
+                  </button>
+                </div>
+                {formPerdido.foto && (
+                  <img src={formPerdido.foto} alt="Prévia pet perdido" className="w-full h-32 object-cover rounded-xl border border-slate-300" />
+                )}
               </div>
 
               <div>
@@ -1384,7 +1862,7 @@ export default function App() {
                 <input type="text" placeholder="Ex: 5588999999999" required value={formPerdido.contatoDono} onChange={(e) => setFormPerdido({ ...formPerdido, contatoDono: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
-              <button type="submit" className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
+              <button type="submit" disabled={processingPhotoPerdido} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
                 Publicar Alerta URGENTE
               </button>
             </form>
@@ -1393,7 +1871,7 @@ export default function App() {
       )}
 
       {showModalMural && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
               <h3 className="font-bold text-lg text-slate-900">Postar Pedido: "Quero Adotar"</h3>
@@ -1428,7 +1906,15 @@ export default function App() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700">Seu Bairro em Quixeramobim</label>
-                <input type="text" required value={formMural.bairroMoradia} onChange={(e) => setFormMural({ ...formMural, bairroMoradia: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <select
+                  value={formMural.bairroMoradia}
+                  onChange={(e) => setFormMural({ ...formMural, bairroMoradia: e.target.value })}
+                  className="mt-1 w-full p-2 border rounded-xl text-xs bg-white"
+                >
+                  {BAIRROS_QUIXERAMOBIM.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                </select>
               </div>
 
               <div>
