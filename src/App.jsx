@@ -79,7 +79,7 @@ const BAIRROS_QUIXERAMOBIM = [
   'Salviano Carlos',
   'Humberto Bezerra',
   'Vila Betânia',
-  'São José',
+  'José de Alencar',
   'Distritos / Zona Rural'
 ];
 
@@ -99,7 +99,7 @@ const INITIAL_HEAT_ZONES = [
   { id: 13, bairro: 'Salviano Carlos', lat: -5.1965, lng: -39.3045, baseOcorrencias: 4 },
   { id: 14, bairro: 'Humberto Bezerra', lat: -5.2040, lng: -39.3040, baseOcorrencias: 6 },
   { id: 15, bairro: 'Vila Betânia', lat: -5.1895, lng: -39.2975, baseOcorrencias: 5 },
-  { id: 16, bairro: 'São José', lat: -5.2082, lng: -39.2968, baseOcorrencias: 7 },
+  { id: 16, bairro: 'José de Alencar', lat: -5.2082, lng: -39.2968, baseOcorrencias: 7 },
   { id: 17, bairro: 'Distritos / Zona Rural', lat: -5.2160, lng: -39.3060, baseOcorrencias: 12 }
 ];
 
@@ -247,7 +247,6 @@ function computeDynamicHeatZones(baseZones, animaisList) {
   });
 }
 
-// Redimensiona e comprime foto da galeria/câmera para caber com folga no Firestore
 function compressImageToBase64(file, maxWidth = 720, quality = 0.72) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
