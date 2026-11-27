@@ -116,7 +116,7 @@ const DEFAULT_ANIMAIS = [
     saude: 'Vacinado, Castrado e Vermifugado',
     tutor: 'Maria Socorro',
     tutorUid: 'sistema-demo',
-    contato: '5588999999999',
+    contato: '88999999999',
     adotado: false,
     foto: 'https://images.unsplash.com/photo-1543466835-00a7907e9de1?auto=format&fit=crop&q=80&w=500'
   },
@@ -132,7 +132,7 @@ const DEFAULT_ANIMAIS = [
     saude: 'Vermifugada e Castrada',
     tutor: 'ONG Patas Amigas QXB',
     tutorUid: 'sistema-demo',
-    contato: '5588988887777',
+    contato: '88988887777',
     adotado: false,
     foto: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&q=80&w=500'
   }
@@ -150,7 +150,9 @@ const DEFAULT_PERDIDOS = [
     dataSumico: '20/11/2026',
     descricao: 'Usa coleira azul. Muito dócil, atende pelo nome.',
     dono: 'Fernanda Oliveira',
-    contatoDono: '5588988889999',
+    donoUid: 'sistema-demo',
+    contatoDono: '88988889999',
+    encontrado: false,
     foto: 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=500'
   }
 ];
@@ -180,13 +182,15 @@ const DEFAULT_MURAL = [
   {
     id: 'mural-1',
     usuarioNome: 'Ana Paula Nobre',
+    usuarioUid: 'sistema-demo',
     especieDesejada: 'Gato',
     porteDesejado: 'Pequeno',
     racaPreferencial: 'Fêmea Filhote ou Castrada',
     bairroMoradia: 'Centro',
     descricao: 'Procuro uma gatinha fêmea dócil para fazer companhia para minha mãe idosa. Casa toda telada.',
-    contato: '5588994433221',
-    dataPostagem: '21/11/2026'
+    contato: '88994433221',
+    dataPostagem: '21/11/2026',
+    resolvido: false
   }
 ];
 
@@ -202,6 +206,37 @@ const EMPTY_ANIMAL_FORM = {
   contato: '',
   foto: ''
 };
+
+const EMPTY_PERDIDO_FORM = {
+  nomeAnimal: '',
+  especie: 'Cão',
+  raca: '',
+  cor: '',
+  porte: 'Médio',
+  bairroSumico: 'Centro',
+  dataSumico: '',
+  descricao: '',
+  contatoDono: '',
+  foto: ''
+};
+
+const EMPTY_MURAL_FORM = {
+  especieDesejada: 'Cão',
+  porteDesejado: 'Médio',
+  racaPreferencial: '',
+  bairroMoradia: 'Centro',
+  descricao: '',
+  contato: ''
+};
+
+function formatBrazilWhatsApp(rawPhone) {
+  const digits = String(rawPhone || '').replace(/\D/g, '');
+  if (!digits) return '';
+  if (digits.startsWith('55') && (digits.length === 12 || digits.length === 13)) {
+    return digits;
+  }
+  return `55${digits}`;
+}
 
 function mergeUniqueById(primaryDocs, fallbackDocs) {
   const map = new Map();
@@ -417,9 +452,12 @@ export default function App() {
   const [processingPhotoAdocao, setProcessingPhotoAdocao] = useState(false);
 
   const [showModalPerdido, setShowModalPerdido] = useState(false);
+  const [editingPerdidoId, setEditingPerdidoId] = useState(null);
   const [processingPhotoPerdido, setProcessingPhotoPerdido] = useState(false);
 
   const [showModalMural, setShowModalMural] = useState(false);
+  const [editingMuralId, setEditingMuralId] = useState(null);
+
   const [showModalEvento, setShowModalEvento] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
 
@@ -435,18 +473,11 @@ export default function App() {
   const [filtroBusca, setFiltroBusca] = useState('');
 
   const [formAdocao, setFormAdocao] = useState(EMPTY_ANIMAL_FORM);
-
-  const [formPerdido, setFormPerdido] = useState({
-    nomeAnimal: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', bairroSumico: 'Centro', dataSumico: '', descricao: '', contatoDono: '', foto: ''
-  });
-
+  const [formPerdido, setFormPerdido] = useState(EMPTY_PERDIDO_FORM);
   const [formEvento, setFormEvento] = useState({
     titulo: '', data: '', horario: '', local: '', organizador: '', descricao: ''
   });
-
-  const [formMural, setFormMural] = useState({
-    especieDesejada: 'Cão', porteDesejado: 'Médio', racaPreferencial: '', bairroMoradia: 'Centro', descricao: '', contato: ''
-  });
+  const [formMural, setFormMural] = useState(EMPTY_MURAL_FORM);
 
   const galleryAdocaoRef = useRef(null);
   const cameraAdocaoRef = useRef(null);
@@ -461,6 +492,16 @@ export default function App() {
   const isOwnerOfAnimal = (animal) => {
     if (!user || !animal) return false;
     return Boolean(animal.tutorUid && animal.tutorUid === user.uid);
+  };
+
+  const isOwnerOfPerdido = (item) => {
+    if (!user || !item) return false;
+    return Boolean(item.donoUid && item.donoUid === user.uid);
+  };
+
+  const isOwnerOfMural = (item) => {
+    if (!user || !item) return false;
+    return Boolean(item.usuarioUid && item.usuarioUid === user.uid);
   };
 
   const dynamicHeatZones = computeDynamicHeatZones(INITIAL_HEAT_ZONES, animaisAdocao);
@@ -508,7 +549,10 @@ export default function App() {
       collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'),
       (snapshot) => {
         const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setAnimaisPerdidos(mergeUniqueById(docs, DEFAULT_PERDIDOS));
+        setAnimaisPerdidos((prev) => {
+          const locaisPendentes = prev.filter((item) => String(item.id).startsWith('local-'));
+          return mergeUniqueById([...locaisPendentes, ...docs], DEFAULT_PERDIDOS);
+        });
       },
       (err) => console.warn('Firestore Perdidos:', err.message)
     );
@@ -526,7 +570,10 @@ export default function App() {
       collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'),
       (snapshot) => {
         const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-        setPedidosMural(mergeUniqueById(docs, DEFAULT_MURAL));
+        setPedidosMural((prev) => {
+          const locaisPendentes = prev.filter((item) => String(item.id).startsWith('local-'));
+          return mergeUniqueById([...locaisPendentes, ...docs], DEFAULT_MURAL);
+        });
       },
       (err) => console.warn('Firestore Mural:', err.message)
     );
@@ -573,9 +620,11 @@ export default function App() {
       await signOut(auth);
       setShowModalAdocao(false);
       setEditingAnimalId(null);
-      setShowModalEvento(false);
       setShowModalPerdido(false);
+      setEditingPerdidoId(null);
       setShowModalMural(false);
+      setEditingMuralId(null);
+      setShowModalEvento(false);
       showToast('Sessão encerrada.');
     } catch (error) {
       console.error('Erro ao sair:', error);
@@ -800,6 +849,104 @@ export default function App() {
     setActiveTab('adocao');
   };
 
+  // --- Achados e Perdidos: criar, editar, marcar encontrado e excluir ---
+  const openNewPerdidoModal = () => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para publicar alerta.');
+      return;
+    }
+    setEditingPerdidoId(null);
+    setFormPerdido(EMPTY_PERDIDO_FORM);
+    setShowModalPerdido(true);
+  };
+
+  const openEditPerdidoModal = (item) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para editar.');
+      return;
+    }
+    if (!isOwnerOfPerdido(item)) {
+      showToast('⛔ Você só pode editar alertas publicados pela sua própria conta.');
+      return;
+    }
+    setEditingPerdidoId(item.id);
+    setFormPerdido({
+      nomeAnimal: item.nomeAnimal || '',
+      especie: item.especie || 'Cão',
+      raca: item.raca || '',
+      cor: item.cor || '',
+      porte: item.porte || 'Médio',
+      bairroSumico: BAIRROS_QUIXERAMOBIM.includes(item.bairroSumico) ? item.bairroSumico : 'Centro',
+      dataSumico: item.dataSumico || '',
+      descricao: item.descricao || '',
+      contatoDono: item.contatoDono || '',
+      foto: item.foto || ''
+    });
+    setShowModalPerdido(true);
+  };
+
+  const handleToggleFoundPerdido = async (item) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para atualizar o alerta.');
+      return;
+    }
+    if (!isOwnerOfPerdido(item)) {
+      showToast('⛔ Apenas o autor da postagem pode alterar o status deste animal.');
+      return;
+    }
+
+    const proximoEstado = !item.encontrado;
+    const msgConfirm = proximoEstado
+      ? `Confirmar que "${item.nomeAnimal}" foi encontrado(a)?`
+      : `Reabrir alerta de desaparecimento de "${item.nomeAnimal}"?`;
+    if (!window.confirm(msgConfirm)) return;
+
+    const isFirestoreDoc = !String(item.id).startsWith('perdido-') && !String(item.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos', item.id), {
+          encontrado: proximoEstado,
+          atualizadoEm: serverTimestamp()
+        });
+        showToast(proximoEstado ? `🎉 "${item.nomeAnimal}" marcado como encontrado!` : `🚨 Alerta de "${item.nomeAnimal}" reaberto.`);
+        return;
+      } catch (err) {
+        console.warn('Erro ao atualizar status perdido:', err.message);
+      }
+    }
+
+    setAnimaisPerdidos((prev) =>
+      prev.map((p) => (p.id === item.id ? { ...p, encontrado: proximoEstado } : p))
+    );
+    showToast(proximoEstado ? `🎉 "${item.nomeAnimal}" marcado como encontrado!` : `🚨 Alerta de "${item.nomeAnimal}" reaberto.`);
+  };
+
+  const handleDeletePerdido = async (item) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para apagar.');
+      return;
+    }
+    if (!isOwnerOfPerdido(item)) {
+      showToast('⛔ Você só pode apagar alertas publicados pela sua própria conta.');
+      return;
+    }
+    if (!window.confirm(`Deseja realmente apagar a postagem de "${item.nomeAnimal}"?`)) return;
+
+    const isFirestoreDoc = !String(item.id).startsWith('perdido-') && !String(item.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos', item.id));
+        showToast(`🗑️ Postagem de "${item.nomeAnimal}" apagada.`);
+        return;
+      } catch (err) {
+        console.warn('Erro ao apagar perdido no Firestore:', err.message);
+      }
+    }
+
+    setAnimaisPerdidos((prev) => prev.filter((p) => p.id !== item.id));
+    showToast(`🗑️ Postagem de "${item.nomeAnimal}" apagada.`);
+  };
+
   const handleSubmitPerdido = async (e) => {
     e.preventDefault();
     if (!user) {
@@ -813,16 +960,56 @@ export default function App() {
       ? fotoLimpa
       : 'https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?auto=format&fit=crop&q=80&w=500';
 
+    if (editingPerdidoId) {
+      const alvo = animaisPerdidos.find((p) => p.id === editingPerdidoId);
+      if (!alvo || !isOwnerOfPerdido(alvo)) {
+        showToast('⛔ Permissão negada: apenas o autor pode editar este alerta.');
+        setShowModalPerdido(false);
+        setEditingPerdidoId(null);
+        return;
+      }
+
+      const dadosAtualizados = {
+        ...formPerdido,
+        foto: fotoFinal,
+        donoUid: user.uid,
+        atualizadoEm: serverTimestamp()
+      };
+
+      const isFirestoreDoc = !String(editingPerdidoId).startsWith('perdido-') && !String(editingPerdidoId).startsWith('local-');
+      if (isFirestoreDoc) {
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos', editingPerdidoId), dadosAtualizados);
+          showToast(`✏️ Alerta de "${formPerdido.nomeAnimal}" atualizado!`);
+        } catch (err) {
+          console.error('Erro ao atualizar perdido:', err);
+          setAnimaisPerdidos((prev) => prev.map((p) => (p.id === editingPerdidoId ? { ...p, ...dadosAtualizados } : p)));
+          showToast('✏️ Alerta atualizado.');
+        }
+      } else {
+        setAnimaisPerdidos((prev) => prev.map((p) => (p.id === editingPerdidoId ? { ...p, ...dadosAtualizados } : p)));
+        showToast('✏️ Alerta atualizado.');
+      }
+
+      setShowModalPerdido(false);
+      setEditingPerdidoId(null);
+      setFormPerdido(EMPTY_PERDIDO_FORM);
+      setActiveTab('perdidos');
+      return;
+    }
+
     const novo = {
       ...formPerdido,
       foto: fotoFinal,
+      encontrado: false,
       dono: user.displayName,
       donoUid: user.uid,
       criadoEm: serverTimestamp()
     };
 
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'), novo);
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'animais_perdidos'), novo);
+      setAnimaisPerdidos((prev) => mergeUniqueById([{ id: docRef.id, ...novo }], prev));
       showToast('🚨 Alerta de animal perdido salvo no Cloud Firestore!');
     } catch (err) {
       console.warn('Salvamento local:', err.message);
@@ -831,8 +1018,170 @@ export default function App() {
     }
 
     setShowModalPerdido(false);
-    setFormPerdido({ nomeAnimal: '', especie: 'Cão', raca: '', cor: '', porte: 'Médio', bairroSumico: 'Centro', dataSumico: '', descricao: '', contatoDono: '', foto: '' });
+    setFormPerdido(EMPTY_PERDIDO_FORM);
     setActiveTab('perdidos');
+  };
+
+  // --- Mural "Quero Adotar": criar, editar, marcar resolvido e excluir ---
+  const openNewMuralModal = () => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para postar no mural.');
+      return;
+    }
+    setEditingMuralId(null);
+    setFormMural(EMPTY_MURAL_FORM);
+    setShowModalMural(true);
+  };
+
+  const openEditMuralModal = (pedido) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para editar.');
+      return;
+    }
+    if (!isOwnerOfMural(pedido)) {
+      showToast('⛔ Você só pode editar pedidos postados pela sua própria conta.');
+      return;
+    }
+    setEditingMuralId(pedido.id);
+    setFormMural({
+      especieDesejada: pedido.especieDesejada || 'Cão',
+      porteDesejado: pedido.porteDesejado || 'Médio',
+      racaPreferencial: pedido.racaPreferencial || '',
+      bairroMoradia: BAIRROS_QUIXERAMOBIM.includes(pedido.bairroMoradia) ? pedido.bairroMoradia : 'Centro',
+      descricao: pedido.descricao || '',
+      contato: pedido.contato || ''
+    });
+    setShowModalMural(true);
+  };
+
+  const handleToggleResolvedMural = async (pedido) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para atualizar o pedido.');
+      return;
+    }
+    if (!isOwnerOfMural(pedido)) {
+      showToast('⛔ Apenas quem postou o pedido pode alterar o status.');
+      return;
+    }
+
+    const proximoResolvido = !pedido.resolvido;
+    const msg = proximoResolvido
+      ? 'Marcar este pedido de adoção como concluído/resolvido?'
+      : 'Reabrir este pedido no mural?';
+    if (!window.confirm(msg)) return;
+
+    const isFirestoreDoc = !String(pedido.id).startsWith('mural-') && !String(pedido.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural', pedido.id), {
+          resolvido: proximoResolvido,
+          atualizadoEm: serverTimestamp()
+        });
+        showToast(proximoResolvido ? '✅ Pedido marcado como concluído!' : '📢 Pedido reaberto no mural.');
+        return;
+      } catch (err) {
+        console.warn('Erro ao atualizar mural:', err.message);
+      }
+    }
+
+    setPedidosMural((prev) =>
+      prev.map((m) => (m.id === pedido.id ? { ...m, resolvido: proximoResolvido } : m))
+    );
+    showToast(proximoResolvido ? '✅ Pedido marcado como concluído!' : '📢 Pedido reaberto no mural.');
+  };
+
+  const handleDeleteMural = async (pedido) => {
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para apagar.');
+      return;
+    }
+    if (!isOwnerOfMural(pedido)) {
+      showToast('⛔ Você só pode apagar pedidos postados pela sua própria conta.');
+      return;
+    }
+    if (!window.confirm('Deseja realmente apagar esta postagem do mural?')) return;
+
+    const isFirestoreDoc = !String(pedido.id).startsWith('mural-') && !String(pedido.id).startsWith('local-');
+    if (isFirestoreDoc) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural', pedido.id));
+        showToast('🗑️ Postagem removida do mural.');
+        return;
+      } catch (err) {
+        console.warn('Erro ao apagar mural no Firestore:', err.message);
+      }
+    }
+
+    setPedidosMural((prev) => prev.filter((m) => m.id !== pedido.id));
+    showToast('🗑️ Postagem removida do mural.');
+  };
+
+  const handleSubmitMural = async (e) => {
+    e.preventDefault();
+    if (!user) {
+      showToast('🔒 Entre com sua conta Google para postar no mural.');
+      return;
+    }
+
+    if (editingMuralId) {
+      const alvo = pedidosMural.find((m) => m.id === editingMuralId);
+      if (!alvo || !isOwnerOfMural(alvo)) {
+        showToast('⛔ Permissão negada: apenas o autor pode editar este pedido.');
+        setShowModalMural(false);
+        setEditingMuralId(null);
+        return;
+      }
+
+      const dadosAtualizados = {
+        ...formMural,
+        usuarioUid: user.uid,
+        atualizadoEm: serverTimestamp()
+      };
+
+      const isFirestoreDoc = !String(editingMuralId).startsWith('mural-') && !String(editingMuralId).startsWith('local-');
+      if (isFirestoreDoc) {
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural', editingMuralId), dadosAtualizados);
+          showToast('✏️ Pedido do mural atualizado!');
+        } catch (err) {
+          console.error('Erro ao atualizar mural:', err);
+          setPedidosMural((prev) => prev.map((m) => (m.id === editingMuralId ? { ...m, ...dadosAtualizados } : m)));
+          showToast('✏️ Pedido atualizado.');
+        }
+      } else {
+        setPedidosMural((prev) => prev.map((m) => (m.id === editingMuralId ? { ...m, ...dadosAtualizados } : m)));
+        showToast('✏️ Pedido atualizado.');
+      }
+
+      setShowModalMural(false);
+      setEditingMuralId(null);
+      setFormMural(EMPTY_MURAL_FORM);
+      setActiveTab('eventos');
+      return;
+    }
+
+    const novo = {
+      ...formMural,
+      resolvido: false,
+      usuarioNome: user.displayName,
+      usuarioUid: user.uid,
+      dataPostagem: new Date().toLocaleDateString('pt-BR'),
+      criadoEm: serverTimestamp()
+    };
+
+    try {
+      const docRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'), novo);
+      setPedidosMural((prev) => mergeUniqueById([{ id: docRef.id, ...novo }], prev));
+      showToast('📢 Pedido salvo no Cloud Firestore!');
+    } catch (err) {
+      console.warn('Salvamento local:', err.message);
+      setPedidosMural((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
+      showToast(`⚠️ Pedido local (Firestore: ${err.code || err.message})`);
+    }
+
+    setShowModalMural(false);
+    setFormMural(EMPTY_MURAL_FORM);
+    setActiveTab('eventos');
   };
 
   const handleSubmitEvento = async (e) => {
@@ -860,35 +1209,6 @@ export default function App() {
 
     setShowModalEvento(false);
     setFormEvento({ titulo: '', data: '', horario: '', local: '', organizador: '', descricao: '' });
-    setActiveTab('eventos');
-  };
-
-  const handleSubmitMural = async (e) => {
-    e.preventDefault();
-    if (!user) {
-      showToast('🔒 Entre com sua conta Google para postar no mural.');
-      return;
-    }
-
-    const novo = {
-      ...formMural,
-      usuarioNome: user.displayName,
-      usuarioUid: user.uid,
-      dataPostagem: new Date().toLocaleDateString('pt-BR'),
-      criadoEm: serverTimestamp()
-    };
-
-    try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pedidos_mural'), novo);
-      showToast('📢 Pedido salvo no Cloud Firestore!');
-    } catch (err) {
-      console.warn('Salvamento local:', err.message);
-      setPedidosMural((prev) => [{ id: `local-${Date.now()}`, ...novo }, ...prev]);
-      showToast(`⚠️ Pedido local (Firestore: ${err.code || err.message})`);
-    }
-
-    setShowModalMural(false);
-    setFormMural({ especieDesejada: 'Cão', porteDesejado: 'Médio', racaPreferencial: '', bairroMoradia: 'Centro', descricao: '', contato: '' });
     setActiveTab('eventos');
   };
 
@@ -1033,13 +1353,13 @@ export default function App() {
                 <Calendar className="w-4 h-4" /> Divulgar Feira
               </button>
               <button
-                onClick={() => setShowModalMural(true)}
+                onClick={openNewMuralModal}
                 className="bg-cyan-700 hover:bg-cyan-800 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
                 <MessageSquare className="w-4 h-4" /> Quero Adotar
               </button>
               <button
-                onClick={() => setShowModalPerdido(true)}
+                onClick={openNewPerdidoModal}
                 className="bg-red-600 hover:bg-red-700 text-white font-bold px-3 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
               >
                 <AlertTriangle className="w-4 h-4" /> Animal Perdido
@@ -1186,6 +1506,7 @@ export default function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {animaisFiltrados.map((a) => {
                 const podeGerenciar = isOwnerOfAnimal(a);
+                const whatsLink = formatBrazilWhatsApp(a.contato);
                 return (
                   <div key={a.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-md transition flex flex-col justify-between">
                     <div>
@@ -1242,7 +1563,7 @@ export default function App() {
 
                     <div className="p-5 pt-0 space-y-2">
                       <a
-                        href={`https://wa.me/${a.contato}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
+                        href={`https://wa.me/${whatsLink}?text=Olá!%20Vi%20o%20anúncio%20do(a)%20${a.nome}%20no%20sistema%20Patas%20de%20Quixeramobim.`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
@@ -1374,7 +1695,7 @@ export default function App() {
 
               {user ? (
                 <button
-                  onClick={() => setShowModalPerdido(true)}
+                  onClick={openNewPerdidoModal}
                   className="bg-red-600 hover:bg-red-700 text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-2 transition shadow cursor-pointer"
                 >
                   <PlusCircle className="w-4 h-4" /> Reportar Animal Perdido
@@ -1387,41 +1708,117 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {animaisPerdidos.map((p) => (
-                <div key={p.id} className="bg-white rounded-2xl overflow-hidden border border-red-200 shadow-sm flex flex-col justify-between">
-                  <div>
-                    <div className="relative">
-                      <img src={p.foto} alt={p.nomeAnimal} className="w-full h-52 object-cover" />
-                      <span className="absolute top-3 left-3 bg-red-600 text-white text-xs font-extrabold px-3 py-1 rounded-full shadow tracking-wider">
-                        PROCURA-SE
-                      </span>
-                    </div>
+              {animaisPerdidos.map((p) => {
+                const podeGerenciar = isOwnerOfPerdido(p);
+                const whatsLink = formatBrazilWhatsApp(p.contatoDono);
+                return (
+                  <div
+                    key={p.id}
+                    className={`bg-white rounded-2xl overflow-hidden border shadow-sm flex flex-col justify-between ${
+                      p.encontrado ? 'border-emerald-300 opacity-90' : 'border-red-200'
+                    }`}
+                  >
+                    <div>
+                      <div className="relative">
+                        <img src={p.foto} alt={p.nomeAnimal} className="w-full h-52 object-cover" />
+                        {p.encontrado ? (
+                          <span className="absolute top-3 left-3 bg-emerald-700 text-white text-xs font-extrabold px-3 py-1 rounded-full shadow tracking-wider">
+                            ENCONTRADO
+                          </span>
+                        ) : (
+                          <span className="absolute top-3 left-3 bg-red-600 text-white text-xs font-extrabold px-3 py-1 rounded-full shadow tracking-wider">
+                            PROCURA-SE
+                          </span>
+                        )}
 
-                    <div className="p-5 space-y-2">
-                      <h3 className="text-xl font-bold text-slate-900">{p.nomeAnimal}</h3>
-                      <p className="text-xs text-slate-600"><strong>Espécie / Raça:</strong> {p.especie} ({p.raca})</p>
-                      <p className="text-xs text-slate-600"><strong>Cor / Porte:</strong> {p.cor} | {p.porte}</p>
-                      <p className="text-xs text-slate-600"><strong>Visto em:</strong> {p.bairroSumico}</p>
-                      <p className="text-xs text-slate-600"><strong>Data do Sumiço:</strong> {p.dataSumico}</p>
-                      <p className="text-xs text-slate-600"><strong>Tutor:</strong> {p.dono}</p>
-                      <div className="bg-red-50 p-2.5 rounded-xl border border-red-200 text-xs text-red-900">
-                        <strong>Relato:</strong> {p.descricao}
+                        {podeGerenciar && (
+                          <div className="absolute top-3 right-3 flex gap-1.5">
+                            <button
+                              onClick={() => openEditPerdidoModal(p)}
+                              title="Editar minha postagem"
+                              className="bg-white/95 hover:bg-blue-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeletePerdido(p)}
+                              title="Apagar minha postagem"
+                              className="bg-white/95 hover:bg-red-600 text-slate-800 hover:text-white p-2 rounded-lg shadow transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="p-5 space-y-2">
+                        <h3 className="text-xl font-bold text-slate-900">{p.nomeAnimal}</h3>
+                        <p className="text-xs text-slate-600"><strong>Espécie / Raça:</strong> {p.especie} ({p.raca})</p>
+                        <p className="text-xs text-slate-600"><strong>Cor / Porte:</strong> {p.cor} | {p.porte}</p>
+                        <p className="text-xs text-slate-600"><strong>Visto em:</strong> {p.bairroSumico}</p>
+                        <p className="text-xs text-slate-600"><strong>Data do Sumiço:</strong> {p.dataSumico}</p>
+                        <p className="text-xs text-slate-600 flex items-center gap-1.5">
+                          <span><strong>Tutor:</strong> {p.dono}</span>
+                          {podeGerenciar && (
+                            <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-1.5 py-0.5 rounded">
+                              Seu post
+                            </span>
+                          )}
+                        </p>
+                        <div className={`p-2.5 rounded-xl border text-xs ${
+                          p.encontrado ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-red-50 border-red-200 text-red-900'
+                        }`}>
+                          <strong>Relato:</strong> {p.descricao}
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  <div className="p-5 pt-0">
-                    <a
-                      href={`https://wa.me/${p.contatoDono}?text=Olá!%20Tenho%20informações%20sobre%20o%20animal%20perdido%20${p.nomeAnimal}.`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
-                    >
-                      <Phone className="w-4 h-4" /> Enviar Notícia pelo WhatsApp
-                    </a>
+                    <div className="p-5 pt-0 space-y-2">
+                      {!p.encontrado && (
+                        <a
+                          href={`https://wa.me/${whatsLink}?text=Olá!%20Tenho%20informações%20sobre%20o%20animal%20perdido%20${p.nomeAnimal}.`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 px-4 rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 transition shadow"
+                        >
+                          <Phone className="w-4 h-4" /> Enviar Notícia pelo WhatsApp
+                        </a>
+                      )}
+
+                      {podeGerenciar && (
+                        <div className="space-y-1.5 pt-1">
+                          <button
+                            onClick={() => handleToggleFoundPerdido(p)}
+                            className={`w-full font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 border transition cursor-pointer ${
+                              p.encontrado
+                                ? 'bg-slate-100 hover:bg-amber-50 text-slate-700 border-slate-200'
+                                : 'bg-emerald-50 hover:bg-emerald-600 text-emerald-900 hover:text-white border-emerald-300'
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {p.encontrado ? 'Marcar como Não Encontrado' : 'Marcar como Encontrado'}
+                          </button>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <button
+                              onClick={() => openEditPerdidoModal(p)}
+                              className="w-full bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Pencil className="w-3.5 h-3.5" /> Editar
+                            </button>
+                            <button
+                              onClick={() => handleDeletePerdido(p)}
+                              className="w-full bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 font-bold py-1.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" /> Apagar
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
@@ -1494,7 +1891,7 @@ export default function App() {
 
                 {user ? (
                   <button
-                    onClick={() => setShowModalMural(true)}
+                    onClick={openNewMuralModal}
                     className="bg-cyan-700 hover:bg-cyan-800 text-white font-bold px-3.5 py-2 rounded-xl text-xs flex items-center gap-1.5 transition shadow cursor-pointer"
                   >
                     <PlusCircle className="w-4 h-4" /> Postar Intenção de Adoção
@@ -1505,40 +1902,97 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {pedidosMural.map((m) => (
-                  <div key={m.id} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-cyan-700 text-white flex items-center justify-center font-bold text-xs">
-                          {m.usuarioNome.charAt(0)}
+                {pedidosMural.map((m) => {
+                  const podeGerenciar = isOwnerOfMural(m);
+                  const whatsLink = formatBrazilWhatsApp(m.contato);
+                  return (
+                    <div
+                      key={m.id}
+                      className={`p-4 rounded-xl border space-y-2 flex flex-col justify-between ${
+                        m.resolvido ? 'bg-emerald-50/60 border-emerald-200' : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="space-y-2">
+                        <div className="flex justify-between items-start gap-2">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-cyan-700 text-white flex items-center justify-center font-bold text-xs">
+                              {m.usuarioNome.charAt(0)}
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                                <span>{m.usuarioNome}</span>
+                                {podeGerenciar && (
+                                  <span className="bg-emerald-100 text-emerald-800 text-[9px] font-bold px-1.5 py-0.5 rounded">
+                                    Seu post
+                                  </span>
+                                )}
+                              </h4>
+                              <span className="text-[10px] text-slate-400">
+                                Postado em {m.dataPostagem} • {m.bairroMoradia || 'Quixeramobim'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                              m.resolvido
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-cyan-100 text-cyan-800'
+                            }`}
+                          >
+                            {m.resolvido ? 'Concluído' : `Procuro: ${m.especieDesejada}`}
+                          </span>
                         </div>
-                        <div>
-                          <h4 className="text-xs font-bold text-slate-900">{m.usuarioNome}</h4>
-                          <span className="text-[10px] text-slate-400">Postado em {m.dataPostagem}</span>
-                        </div>
+
+                        <p className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200">
+                          "{m.descricao}"
+                        </p>
                       </div>
-                      <span className="bg-cyan-100 text-cyan-800 text-[10px] font-bold px-2 py-0.5 rounded">
-                        Procuro: {m.especieDesejada}
-                      </span>
-                    </div>
 
-                    <p className="text-xs text-slate-700 bg-white p-2.5 rounded-lg border border-slate-200">
-                      "{m.descricao}"
-                    </p>
+                      <div className="space-y-2 pt-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-slate-500"><strong>Porte:</strong> {m.porteDesejado} | {m.racaPreferencial}</span>
+                          {!m.resolvido && (
+                            <a
+                              href={`https://wa.me/${whatsLink}?text=Olá%20${m.usuarioNome}!%20Vi%20seu%20pedido%20no%20mural%20Patas%20de%20Quixeramobim.`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-emerald-700 font-bold hover:underline flex items-center gap-1"
+                            >
+                              <Phone className="w-3 h-3" /> Responder
+                            </a>
+                          )}
+                        </div>
 
-                    <div className="flex justify-between items-center text-xs pt-1">
-                      <span className="text-slate-500"><strong>Porte:</strong> {m.porteDesejado} | {m.racaPreferencial}</span>
-                      <a
-                        href={`https://wa.me/${m.contato}?text=Olá%20${m.usuarioNome}!%20Vi%20seu%20pedido%20no%20mural%20Patas%20de%20Quixeramobim.`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-emerald-700 font-bold hover:underline flex items-center gap-1"
-                      >
-                        <Phone className="w-3 h-3" /> Responder
-                      </a>
+                        {podeGerenciar && (
+                          <div className="space-y-1.5 border-t border-slate-200 pt-2">
+                            <button
+                              onClick={() => handleToggleResolvedMural(m)}
+                              className="w-full bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-800 border border-slate-300 font-bold py-1.5 px-3 rounded-lg text-[11px] flex items-center justify-center gap-1.5 transition cursor-pointer"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {m.resolvido ? 'Marcar como Pendente' : 'Marcar como Resolvido'}
+                            </button>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => openEditMuralModal(m)}
+                                className="w-full bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                              >
+                                <Pencil className="w-3 h-3" /> Editar
+                              </button>
+                              <button
+                                onClick={() => handleDeleteMural(m)}
+                                className="w-full bg-white hover:bg-red-50 text-slate-700 hover:text-red-700 border border-slate-200 font-bold py-1.5 px-2 rounded-lg text-[11px] flex items-center justify-center gap-1 transition cursor-pointer"
+                              >
+                                <Trash2 className="w-3 h-3" /> Apagar
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1695,8 +2149,8 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700">WhatsApp para Contato (com DDD)</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formAdocao.contato} onChange={(e) => setFormAdocao({ ...formAdocao, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <label className="block text-xs font-bold text-slate-700">WhatsApp para Contato (DDD + Número)</label>
+                <input type="text" placeholder="Ex: 88999999999" required value={formAdocao.contato} onChange={(e) => setFormAdocao({ ...formAdocao, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button
@@ -1765,8 +2219,17 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-lg text-slate-900">Publicar Alerta de Animal Perdido</h3>
-              <button onClick={() => setShowModalPerdido(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+              <h3 className="font-bold text-lg text-slate-900">
+                {editingPerdidoId ? 'Editar Meu Alerta de Animal Perdido' : 'Publicar Alerta de Animal Perdido'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowModalPerdido(false);
+                  setEditingPerdidoId(null);
+                  setFormPerdido(EMPTY_PERDIDO_FORM);
+                }}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1857,12 +2320,12 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700">WhatsApp do Tutor</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formPerdido.contatoDono} onChange={(e) => setFormPerdido({ ...formPerdido, contatoDono: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <label className="block text-xs font-bold text-slate-700">WhatsApp do Tutor (DDD + Número)</label>
+                <input type="text" placeholder="Ex: 88999999999" required value={formPerdido.contatoDono} onChange={(e) => setFormPerdido({ ...formPerdido, contatoDono: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" disabled={processingPhotoPerdido} className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
-                Publicar Alerta URGENTE
+                {editingPerdidoId ? 'Salvar Alterações do Alerta' : 'Publicar Alerta URGENTE'}
               </button>
             </form>
           </div>
@@ -1873,8 +2336,17 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[600] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b pb-3">
-              <h3 className="font-bold text-lg text-slate-900">Postar Pedido: "Quero Adotar"</h3>
-              <button onClick={() => setShowModalMural(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+              <h3 className="font-bold text-lg text-slate-900">
+                {editingMuralId ? 'Editar Meu Pedido no Mural' : 'Postar Pedido: "Quero Adotar"'}
+              </h3>
+              <button
+                onClick={() => {
+                  setShowModalMural(false);
+                  setEditingMuralId(null);
+                  setFormMural(EMPTY_MURAL_FORM);
+                }}
+                className="text-slate-400 hover:text-slate-700 cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1922,12 +2394,12 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700">Seu WhatsApp</label>
-                <input type="text" placeholder="Ex: 5588999999999" required value={formMural.contato} onChange={(e) => setFormMural({ ...formMural, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
+                <label className="block text-xs font-bold text-slate-700">Seu WhatsApp (DDD + Número)</label>
+                <input type="text" placeholder="Ex: 88999999999" required value={formMural.contato} onChange={(e) => setFormMural({ ...formMural, contato: e.target.value })} className="mt-1 w-full p-2 border rounded-xl text-xs" />
               </div>
 
               <button type="submit" className="w-full bg-cyan-700 hover:bg-cyan-800 text-white font-bold py-2.5 rounded-xl text-xs transition mt-2 cursor-pointer">
-                Publicar no Mural Público
+                {editingMuralId ? 'Salvar Alterações do Pedido' : 'Publicar no Mural Público'}
               </button>
             </form>
           </div>
